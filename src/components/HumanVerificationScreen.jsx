@@ -9,11 +9,15 @@ import { translations } from '../data/mockData';
  */
 const HumanVerificationScreen = () => {
   const navigate = useNavigate();
-  const { 
+  const {
     language,
-    setVerificationStatus
+    setVerificationStatus,
+    formData,
+    serviceType,
+    accountNumber,
+    authToken
   } = useAppState();
-  
+
   const t = translations[language];
   const [pin, setPin] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -28,7 +32,7 @@ const HumanVerificationScreen = () => {
     setPin('');
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (pin.length !== 4) {
       alert('Please enter 4-digit PIN');
       return;
@@ -36,19 +40,40 @@ const HumanVerificationScreen = () => {
 
     setIsProcessing(true);
 
-    // Simulate verification delay
-    setTimeout(() => {
-      // Accept any 4-digit PIN for demo (in real system, verify against database)
-      if (pin.length === 4) {
+    try {
+      const payload = {
+        service_type: serviceType || 'unknown',
+        form_data: formData,
+        staff_pin: pin,
+        account_number: accountNumber || formData.accountNumber
+      };
+
+      const response = await fetch('/api/forms/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
         setVerificationStatus('approved');
         navigate('/success');
       } else {
+        const errorData = await response.json();
         setVerificationStatus('rejected');
-        alert('Invalid PIN. Please try again.');
+        alert(`Verification Failed: ${errorData.detail || 'Invalid PIN'}`);
         setPin('');
         setIsProcessing(false);
       }
-    }, 2000);
+    } catch (err) {
+      console.error('Submission error:', err);
+      setVerificationStatus('rejected');
+      alert('Network error during verification. Please try again.');
+      setPin('');
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -75,14 +100,14 @@ const HumanVerificationScreen = () => {
           </div>
         </div>
 
-        <div style={{ 
-          backgroundColor: '#f8f9fa', 
-          padding: '40px', 
+        <div style={{
+          backgroundColor: '#f8f9fa',
+          padding: '40px',
           borderRadius: '16px',
           maxWidth: '600px'
         }}>
-          <div style={{ 
-            fontSize: '24px', 
+          <div style={{
+            fontSize: '24px',
             marginBottom: '30px',
             textAlign: 'center',
             color: '#666'
@@ -90,9 +115,9 @@ const HumanVerificationScreen = () => {
             {t.staffPinPrompt}
           </div>
 
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'center', 
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
             gap: '20px',
             marginBottom: '30px'
           }}>

@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: sahayak_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sahayak
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sahayak_backend
+    environment:
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=sahayak
+      - JWT_SECRET=supersecretkey_sahayak
+      - STT_SERVICE_URL=http://stt:8001
+      - TTS_SERVICE_URL=http://tts:8002
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  stt:
+    build:
+      context: ./microservices/stt
+      dockerfile: Dockerfile
+    container_name: sahayak_stt
+    ports:
+      - "8001:8001"
+    # Optional: share host volume for faster model caching
+    # volumes:
+    #   - ~/.cache/whisper:/root/.cache/whisper
+    restart: unless-stopped
+
+  tts:
+    build:
+      context: ./microservices/tts
+      dockerfile: Dockerfile
+    container_name: sahayak_tts
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sahayak_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

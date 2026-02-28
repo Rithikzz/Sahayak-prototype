@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { translations, formTemplates } from '../data/mockData';
@@ -9,16 +9,18 @@ import { translations, formTemplates } from '../data/mockData';
  */
 const InputController = () => {
   const navigate = useNavigate();
-  const { 
-    language, 
-    inputMode, 
-    serviceType, 
+  const {
+    language,
+    inputMode,
+    serviceType,
     formData,
     updateFormField,
     currentFieldIndex,
-    setCurrentFieldIndex
+    setCurrentFieldIndex,
+    formTemplates,
+    isLoadingTemplates
   } = useAppState();
-  
+
   const t = translations[language];
   const template = formTemplates[serviceType];
   const fields = template?.fields || [];
@@ -26,9 +28,19 @@ const InputController = () => {
 
   const [inputValue, setInputValue] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioChunks, setAudioChunks] = useState([]);
+
+  const isListeningRef = useRef(isListening);
+  const handleVoiceStartRef = useRef(null);
+
+  useEffect(() => {
+    isListeningRef.current = isListening;
+    // We bind handleVoiceStartRef to the function lower down via an effect
+  });
 
   const effectiveInputMode = inputMode === 'assisted' ? 'voice' : inputMode;
-  const isCashService = serviceType === 'deposit' || serviceType === 'withdrawal';
+  const isCashService = serviceType === 'deposit' || serviceType === 'withdrawal' || serviceType === 'transactionForms';
   const isAmountField = currentField?.id === 'amount' || currentField?.type === 'number';
   const useKeypad = effectiveInputMode !== 'voice' && isCashService && (isAmountField || currentField?.id === 'accountNumber' || currentField?.type === 'tel');
 
@@ -39,7 +51,41 @@ const InputController = () => {
     } else {
       setInputValue('');
     }
-  }, [currentField, formData]);
+
+    // Play TTS for the current field label, if voice mode is active
+    if (currentField && effectiveInputMode === 'voice') {
+      playTTS(currentField.label);
+    }
+  }, [currentField, formData, effectiveInputMode]);
+
+  const playTTS = async (text) => {
+    try {
+      const formData = new FormData();
+      formData.append('text', text);
+      formData.append('lang', language);
+
+      const response = await fetch('/api/voice/synthesize', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+
+        audio.onended = () => {
+          if (handleVoiceStartRef.current) {
+            handleVoiceStartRef.current(true); // autoStart = true
+          }
+        };
+
+        audio.play();
+      }
+    } catch (err) {
+      console.error("TTS Error:", err);
+    }
+  };
 
   // Handle numeric keypad input (for amount fields)
   const handleKeypadPress = (value) => {
@@ -52,39 +98,104 @@ const InputController = () => {
     }
   };
 
-  // Simulate voice input (mock)
-  const handleVoiceStart = () => {
-    setIsListening(true);
-    
-    // Simulate voice recognition after 3 seconds
-    setTimeout(() => {
-      const mockValue = getMockVoiceValue(currentField);
-      setInputValue(mockValue);
-      setIsListening(false);
-    }, 3000);
+  // Start recording audio for STT
+  const handleVoiceStart = async (isAutoStart = false) => {
+    if (isListeningRef.current) {
+      // Stop listening manually if clicked again
+      if (!isAutoStart) stopRecording();
+      return;
+    }
+
+    const indexCapture = currentFieldIndex;
+    const fieldCapture = currentField;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        await uploadAudioForSTT(audioBlob, indexCapture, fieldCapture);
+        // Clean up tracks
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsListening(true);
+
+      // Auto-stop after 5 seconds of recording
+      setTimeout(() => {
+        if (recorder.state === 'recording') {
+          recorder.stop();
+        }
+      }, 5000);
+
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      alert("Microphone access is required for voice input");
+    }
   };
 
-  const getMockVoiceValue = (field) => {
-    // Mock data for voice simulation
-    const mocks = {
-      accountNumber: '1234567890',
-      amount: '5000',
-      depositorName: 'Ramesh Kumar',
-      phoneNumber: '9876543210',
-      fullName: 'Ramesh Kumar Singh',
-      fatherName: 'Rajesh Singh',
-      dateOfBirth: '15-06-1985',
-      aadharNumber: '1234 5678 9012',
-      panNumber: 'ABCDE1234F',
-      address: '123 MG Road',
-      city: 'Mumbai',
-      pincode: '400001',
-      email: 'ramesh@example.com',
-      newAddress: '456 Park Street',
-      purpose: 'Personal use',
-      proofType: 'Aadhar Card'
-    };
-    return mocks[field.id] || 'Sample Value';
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+    setIsListening(false);
+  };
+
+  useEffect(() => {
+    handleVoiceStartRef.current = handleVoiceStart;
+  }, [handleVoiceStart]);
+
+  const uploadAudioForSTT = async (audioBlob, indexCapture, fieldCapture) => {
+    setIsListening(false); // Update UI immediately to show processing/done
+    setInputValue("Processing audio..."); // Temporary feedback
+
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+
+      const response = await fetch('/api/voice/transcribe', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.text || '';
+
+        let finalText = text;
+        if (text.trim().length > 0) {
+          setInputValue(text);
+        } else {
+          finalText = "[No Speech Detected]";
+          setInputValue(finalText);
+        }
+
+        // Auto-proceed to the next step automatically mapping to the user request!
+        setTimeout(() => {
+          updateFormField(fieldCapture.id, finalText);
+          if (indexCapture < fields.length - 1) {
+            setCurrentFieldIndex(indexCapture + 1);
+          } else {
+            navigate('/field-confirmation');
+          }
+        }, 1500);
+
+      } else {
+        console.error("STT returned error", response.status);
+        setInputValue("Transcription failed. Please try again.");
+      }
+    } catch (err) {
+      console.error("STT request failed", err);
+      setInputValue("Network error. Please try again.");
+    }
   };
 
   const handleNext = () => {
@@ -113,8 +224,12 @@ const InputController = () => {
     }
   };
 
+  if (isLoadingTemplates) {
+    return <div className="kiosk-screen"><div className="kiosk-content"><div className="kiosk-title">Loading Forms...</div></div></div>;
+  }
+
   if (!currentField) {
-    return <div>Loading...</div>;
+    return <div className="kiosk-screen"><div className="kiosk-content"><div className="kiosk-title">Loading Field...</div></div></div>;
   }
 
   const showVoiceInput = effectiveInputMode === 'voice';
@@ -137,7 +252,7 @@ const InputController = () => {
           <span>Field {currentFieldIndex + 1} of {fields.length}</span>
           {effectiveInputMode === 'voice' && <span style={{ fontSize: '20px' }}>🎤</span>}
         </div>
-        
+
         <h1 className="kiosk-title" style={{ fontSize: showVoiceInput ? '48px' : '36px', marginBottom: '40px' }}>
           {currentField.label}
         </h1>
@@ -185,24 +300,24 @@ const InputController = () => {
             {isListening ? (
               // Listening state with animated microphone
               <div style={{ textAlign: 'center' }}>
-                <div className="mic-icon" style={{ 
-                  width: '240px', 
-                  height: '240px', 
+                <div className="mic-icon" style={{
+                  width: '240px',
+                  height: '240px',
                   fontSize: '120px',
                   marginBottom: '30px'
                 }}>
                   🎤
                 </div>
-                <div className="voice-text" style={{ 
-                  color: '#dc3545', 
+                <div className="voice-text" style={{
+                  color: '#dc3545',
                   fontWeight: 'bold',
                   fontSize: '32px',
                   marginBottom: '20px'
                 }}>
                   {t.listening}
                 </div>
-                <div style={{ 
-                  fontSize: '22px', 
+                <div style={{
+                  fontSize: '22px',
                   color: '#666',
                   maxWidth: '500px',
                   margin: '0 auto'
@@ -247,10 +362,10 @@ const InputController = () => {
 
                 {/* Display captured value in large text */}
                 {inputValue && (
-                  <div style={{ 
-                    backgroundColor: '#d4edda', 
+                  <div style={{
+                    backgroundColor: '#d4edda',
                     border: '4px solid #28a745',
-                    padding: '40px', 
+                    padding: '40px',
                     borderRadius: '20px',
                     fontSize: '42px',
                     fontWeight: 'bold',
@@ -264,12 +379,12 @@ const InputController = () => {
                     {inputValue}
                   </div>
                 )}
-                
+
                 {/* Large microphone button */}
                 <button
                   className="btn btn-primary btn-large"
                   onClick={handleVoiceStart}
-                  style={{ 
+                  style={{
                     minWidth: '400px',
                     minHeight: '140px',
                     fontSize: '32px',
@@ -307,7 +422,7 @@ const InputController = () => {
       </div>
 
       <div className="action-bar">
-        <button 
+        <button
           className="btn btn-secondary"
           onClick={handleBack}
           disabled={isListening}
@@ -316,7 +431,7 @@ const InputController = () => {
         </button>
 
         {inputValue && !isListening && (
-          <button 
+          <button
             className="btn btn-success btn-large"
             onClick={handleNext}
           >

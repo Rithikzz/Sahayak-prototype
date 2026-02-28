@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 // Central state management for kiosk application
 const AppStateContext = createContext();
@@ -12,49 +12,93 @@ export const useAppState = () => {
 };
 
 export const AppStateProvider = ({ children }) => {
+  // Global App configuration data
+  const [formTemplates, setFormTemplates] = useState({});
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
+
+  // Fetch templates from API on mount
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        const response = await fetch('/api/forms/templates');
+        if (response.ok) {
+          const data = await response.json();
+          setFormTemplates(data);
+        } else {
+          console.error("Failed to fetch templates from backend");
+        }
+      } catch (err) {
+        console.error("Error connecting to backend API:", err);
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+    fetchTemplates();
+  }, []);
+
   // Language selection
   const [language, setLanguage] = useState('en');
-  
+
   // Account authentication data
   const [accountNumber, setAccountNumber] = useState('');
   const [pin, setPin] = useState('');
-  
+
   // OTP data
   const [otp, setOtp] = useState('');
   const [otpTimer, setOtpTimer] = useState(60);
   const [canResendOtp, setCanResendOtp] = useState(false);
-  
+
   // Input mode: 'voice', 'touch', 'assisted'
   const [inputMode, setInputMode] = useState(null);
-  
+
   // Selected service: 'deposit', 'withdrawal', 'accountOpening', 'addressUpdate'
   const [serviceType, setServiceType] = useState(null);
-  
+
   // Current form category (for new 9-category system)
   const [currentFormCategory, setCurrentFormCategory] = useState(null);
-  
+
   // Form data collected from user
   const [formData, setFormData] = useState({});
-  
+
   // Current field being filled (for voice/touch input)
   const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
-  
+
   // Verification status
   const [verificationStatus, setVerificationStatus] = useState('pending'); // 'pending', 'approved', 'rejected'
-  
+
   // Staff PIN for approval
   const [staffPin, setStaffPin] = useState('');
-  
+
   // Authentication state - staff must login after language selection
   const [authPassed, setAuthPassed] = useState(false);
   const [staffLoginPin, setStaffLoginPin] = useState('');
-  
-  // Mock staff PIN for authentication (in production, this would be validated server-side)
-  const MOCK_STAFF_PIN = '1234';
-  
-  // Validate staff PIN
-  const validateStaffPin = (pin) => {
-    return pin === MOCK_STAFF_PIN;
+
+  // Token for backend requests
+  const [authToken, setAuthToken] = useState(localStorage.getItem('sahayak_token') || null);
+  const [staffName, setStaffName] = useState(localStorage.getItem('sahayak_staff_name') || '');
+
+  // Validate staff PIN against backend API
+  const validateStaffPin = async (pin) => {
+    try {
+      const response = await fetch('/api/auth/staff-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAuthToken(data.access_token);
+        setStaffName(data.staff_name);
+        localStorage.setItem('sahayak_token', data.access_token);
+        localStorage.setItem('sahayak_staff_name', data.staff_name);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
+    }
   };
 
   // Update a single form field
@@ -69,6 +113,10 @@ export const AppStateProvider = ({ children }) => {
   const clearAuthState = () => {
     setAuthPassed(false);
     setStaffLoginPin('');
+    setAuthToken(null);
+    setStaffName('');
+    localStorage.removeItem('sahayak_token');
+    localStorage.removeItem('sahayak_staff_name');
   };
 
   // Reset entire state (for new session)
@@ -122,8 +170,12 @@ export const AppStateProvider = ({ children }) => {
     staffLoginPin,
     setStaffLoginPin,
     validateStaffPin,
+    authToken,
+    staffName,
     clearAuthState,
-    resetState
+    resetState,
+    formTemplates,
+    isLoadingTemplates
   };
 
   return (
