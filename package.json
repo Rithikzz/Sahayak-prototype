@@ -1,37 +1,20 @@
 {
   "name": "sahayak-kiosk",
   "version": "1.0.0",
-  "description": "Bank-grade self-service kiosk UI for SAHAYAK system",
+  "description": "SAHAYAK kiosk system — tests & tooling",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:report": "playwright show-report tests/playwright-report"
   },
-  "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.20.0"
-  },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "@types/react": "^18.2.43",
-    "@types/react-dom": "^18.2.17",
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.8"
-  },
-  "main": "setup.js",
-  "directories": {
-    "doc": "docs"
+    "@playwright/test": "^1.58.2"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Rithikzz/Sahayak--kiosk.git"
   },
-  "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {

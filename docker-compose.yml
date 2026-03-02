@@ -79,7 +79,7 @@ services:
 
   frontend:
     build:
-      context: .
+      context: ./kiosk
       dockerfile: Dockerfile
     container_name: sahayak_frontend
     ports:
