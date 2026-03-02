@@ -1,143 +1,202 @@
-# SAHAYAK Bank Kiosk - Complete Self-Service System
+# SAHAYAK — Bank Kiosk & Admin System
 
-A bank-grade self-service kiosk authentication and service UI built for the SAHAYAK system used inside bank branches in India. Now newly upgraded with an End-to-End Generative AI Microservice Backend Architecture!
-
-## 🎯 Purpose
-
-This kiosk interface provides a complete self-service banking experience with:
-- **Staff authentication** - Bank staff must login before customer use (Secured via Bcrypt & JWT)
-- **Multi-language support** - English, Hindi, Tamil
-- **9 comprehensive banking form categories** - Account opening, transactions, loans, KYC, service requests, transfers, investments, enquiries, closures. Forms logic is dynamically loaded from the database!
-- **Voice + IVR mode** - Powered by real Python AI Microservices (Whisper STT & Google TTS) for a fully continuous Auto-Advance voice flow.
-- **Touch mode** - Traditional on-screen keypad and text input.
-- **Human verification** - Staff approval required before form submission into the PostgreSQL Database.
-- **Containerized** - A highly resilient 5-container architecture mapped with Docker Compose.
-
-## 🏗️ Architecture
-
-### Technology Stack
-- **Frontend**: React 18, Vite, Context API, CSS (Reverse Proxied via Nginx)
-- **Core API Backend**: Python (FastAPI), SQLAlchemy, PyJWT, Bcrypt
-- **Database**: PostgreSQL 15 (JSONB for dynamic form storage)
-- **AI Microservices**: 
-  - Speech-to-Text: Python, FastAPI, `openai-whisper` (Base model)
-  - Text-to-Speech: Python, FastAPI, `gTTS`
-- **Orchestration**: Docker & Docker Compose
-
-### Complete Microservice Data Flow
-```mermaid
-graph TD
-    User([Kiosk User/MIC]) -->|Port 80 HTTP| Nginx[Frontend: Nginx + React]
-    
-    Nginx -->|/assets/*| React(Static Files)
-    Nginx -->|/api/* (Reverse Proxy)| FastAPI_Core[Backend: FastAPI Core]
-    
-    FastAPI_Core -->|Reads/Writes Form JSON| Postgres[(PostgreSQL DB)]
-    
-    FastAPI_Core -->|Sends generic text/lang| TTS[Microservice: Google TTS]
-    TTS -->|Streams MP3 audio| FastAPI_Core
-    
-    FastAPI_Core -->|Forwards WebM audio blob| STT[Microservice: Whisper STT]
-    STT -->|Returns pure text strings| FastAPI_Core
-```
-
-## 📚 Comprehensive Documentation
-
-For engineers maintaining this system, please explore the `docs/` folder:
-1. `docs/01_architecture.md`: System sequence overview and microservice interactions.
-2. `docs/02_running_app.md`: How to cold-boot the Docker Compose stack natively and testing.
-3. `docs/03_debugging_and_fixes.md`: A catalog of complex architectural bugs resolved (e.g. streaming proxy fixes, React Auto-Advance lifecycle).
-4. `docs/04_future_development.md`: Upgrade pipelines for STT/TTS offline modes.
-
-## 📋 Banking Form Categories
-
-The kiosk dynamically queries PostgreSQL to build these **9 comprehensive banking form templates**:
-1. **📋 Account Opening Forms** - New savings, current, or FD accounts 
-2. **💰 Transaction Forms** - Deposit/Withdraw slips (Used heavily to test Voice e2e)
-3. **🏦 Loan Application Forms** - Personal, home, vehicle, business loans 
-4. **🆔 KYC Forms** - Identity & address verification 
-5. **📞 Service Request Forms** - Cheque books, ATM cards, contact updates 
-6. **↔️ Transfer & Remittance Forms** - RTGS/NEFT/inward remittance 
-7. **📈 Investment & Wealth Forms** - Mutual funds, insurance, investments 
-8. **❓ Enquiry & Dispute Forms** - Complaints, statement requests 
-9. **🔒 Closure & Nomination Forms** - Account closure, nominee updates 
-
-## 🎨 Design & Voice Principles
-
-### Voice-First Automated IVR
-- **Voice-first UI**: Minimal text, large icons.
-- **Auto-Advance AI flow**:
-  1. Kiosk speaks the next input field via TTS.
-  2. Kiosk automatically records user microphone for 5 seconds.
-  3. Audio is zipped automatically to Whisper STT Python node.
-  4. Response is validated. Silence (`[No Speech Detected]`) or valid text is captured.
-  5. UI automatically clicks "Next Field" without the user ever touching the screen!
-- **Feedback**: Captured text shown in a massive green success box instantly.
-
-### Touch-First Design
-- Very large touch targets (80px+ height)
-- Professional High-Contrast UI for Accessibility (WCAG AAA)
-- Custom responsive Numeric Keypad.
-
-## 🚀 Setup & Installation
-
-### Prerequisites
-- Docker Engine
-- Docker Compose
-
-### Installation (One-Click)
-
-From the root repository containing `docker-compose.yml`:
-```bash
-# Build and background run the entire 5 container stack
-docker compose up -d --build
-```
-*Wait ~10-15 seconds for the Whisper ML model to download into memory if this is your first time!*
-
-Then, simply open your web browser to:
-`http://localhost` (or `http://localhost:80`)
-
-### Developer Hot-Reloading
-
-If you make edits to a specific subsystem, you do not need to reboot the entire stack:
-```bash
-# To rebuild frontend React UI only
-docker compose up -d --build frontend
-
-# To rebuild Python core API only
-docker compose up -d --build backend
-```
-
-## 🧪 Testing Flow
-
-### Complete Flow Test (E2E Voice Mode + Transaction Forms)
-1. **Language Selection**: Select English, Hindi, or Tamil
-2. **Staff Authentication**: Enter default Admin PIN `1234`
-3. **Mode Selection**: Choose "Voice + IVR" (Recommended)
-4. **Service Selection**: Choose "Transaction Forms (Deposit/Withdrawal)"
-5. **Auto-Voice Sequence**: 
-   - Wait for the TTS to speak. 
-   - The microphone activates automatically. Speak into it!
-   - Wait 5 seconds. The text maps dynamically.
-   - The flow automatically proceeds to the next form field.
-6. **Field Confirmation**: Review all fields.
-7. **Human Verification**: Staff enters standard `1234` PIN to greenlight.
-8. **Success**: Form is committed as a permanent JSON row into the PostgreSQL database!
-
-### Automated Python Tests
-Run the internal test suite across the container fabric to verify STT proxy latencies:
-```bash
-docker exec -it sahayak_backend python /app/test_integration.py
-```
-
-## 📄 License
-Proprietary - SAHAYAK Bank System
-
-## 👥 Support
-For bank branch support:
-- Contact IT helpdesk
-- Reference: SAHAYAK Kiosk Authentication System v2.0 (Microservices Build)
+A fully containerised, AI-powered self-service banking kiosk system for Indian bank branches. Customers fill out banking forms using voice or touch, guided by a multilingual assistant. A separate admin portal lets bank managers oversee kiosks, staff, submissions, and OTA updates.
 
 ---
 
-**Built with care for Indian banking customers** 🇮🇳
+## Quick Start
+
+**Prerequisites:** Docker Engine, Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+| URL | What |
+|-----|------|
+| http://localhost | Kiosk frontend |
+| http://localhost:8080 | Admin portal |
+| http://localhost:5000/docs | Backend Swagger UI |
+
+**Default credentials**
+- Admin login: `admin@sahayak.com` / `admin123`
+- Kiosk staff PIN: `1234`
+
+---
+
+## Architecture — 7 Containers
+
+```
+  Kiosk browser :80      ──▶  sahayak_frontend  (Nginx + React)  ─┐
+  Admin browser :8080    ──▶  sahayak_admin     (Nginx + React)  ─┤
+                                                                    ▼
+                                              sahayak_backend  (FastAPI :5000)
+                                                    │        │        │
+                                              sahayak_db   stt:8001  tts:8002
+                                              (Postgres)   Whisper   gTTS
+                                                                      │
+                                                                  ocr:8003
+```
+
+| Container | Port | Role |
+|---|---|---|
+| `sahayak_db` | 5432 | PostgreSQL 15 — persistent store |
+| `sahayak_backend` | 5000 | FastAPI — all business logic + JWT auth |
+| `sahayak_frontend` | 80 | Kiosk React UI (Nginx reverse proxy) |
+| `sahayak_admin` | 8080 | Admin portal React UI (Nginx reverse proxy) |
+| `sahayak_stt` | 8001 | Speech-to-Text (Whisper base) |
+| `sahayak_tts` | 8002 | Text-to-Speech (gTTS, en/hi/ta) |
+| `sahayak_ocr` | 8003 | OCR — physical document scanning |
+
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Kiosk Frontend | React 18.2, React Router 6, CSS custom variables |
+| Admin Frontend | React 18.2, TailwindCSS 3, Vite 4 |
+| Backend API | Python 3.11, FastAPI, SQLAlchemy 2, Uvicorn |
+| Database | PostgreSQL 15 (Alpine), psycopg2 |
+| Auth | python-jose (JWT HS256), bcrypt — dual flows (staff 12h / admin 24h) |
+| STT | OpenAI Whisper base model + ffmpeg |
+| TTS | gTTS (Google Text-to-Speech), multilingual en/hi/ta |
+| OCR | FastAPI + image processing |
+| Orchestration | Docker Compose |
+| Testing | Playwright + Chromium |
+
+---
+
+## Repository Structure
+
+```
+Sahayak--kiosk/
+├── kiosk/               Kiosk React frontend (src/, index.html, vite.config.js, Dockerfile)
+├── Sahayak_admin/       Admin portal React frontend
+├── backend/             FastAPI Python backend (routes, models, DB)
+├── microservices/
+│   ├── stt/             Whisper STT microservice
+│   ├── tts/             gTTS TTS microservice
+│   └── ocr/             OCR microservice
+├── tests/e2e/           Playwright test suites
+├── docs/                Architecture, API reference, testing guide (7 files)
+├── doc/                 Legacy markdown documents
+├── scripts/             Setup and utility scripts
+├── docker-compose.yml
+├── package.json         Root — Playwright test runner only
+└── playwright.config.js
+```
+
+---
+
+## Kiosk User Flow
+
+```
+Welcome (language select)
+  → Authentication (account number + PIN)
+  → OTP Verification
+  → Mode Selection  ─── PROTECTED (requires auth) ───
+  → Service Selection (9 categories, loaded from DB)
+  → Input (voice IVR or touch keypad, field by field)
+  → Form Preview
+  → Human Verification (staff PIN approval)
+  → Success (submission saved to PostgreSQL)
+```
+
+**Voice IVR auto-advance:** TTS speaks each field → mic auto-activates → Whisper transcribes → next field, no screen touch needed.
+
+---
+
+## Admin Portal
+
+Full management interface at `http://localhost:8080`:
+
+- **Dashboard** — live KPI cards + charts (forms today, active kiosks, error rate)
+- **Kiosks** — register and monitor kiosk devices by heartbeat status
+- **Staff** — create staff, reset PINs, assign roles
+- **Reports** — usage by service type, error trends, regional breakdown
+- **OTA Updates** — push firmware/app updates to kiosks over the air
+- **Forms & Templates** — visual field builder for all 9 form categories
+- **Submissions** — browse and filter all form submissions
+- **Admin Users** — manage admin accounts and roles
+- **Settings** — system-wide configuration toggles
+
+---
+
+## Banking Form Categories
+
+All 9 categories are stored in PostgreSQL and dynamically served to kiosks:
+
+1. Account Opening Forms — savings, current, FD
+2. Transaction Forms — deposit / withdrawal slips
+3. Loan Application Forms — personal, home, vehicle, business
+4. KYC Forms — identity & address verification
+5. Service Request Forms — cheque books, ATM cards, contact updates
+6. Transfer & Remittance Forms — RTGS / NEFT / inward remittance
+7. Investment & Wealth Forms — mutual funds, insurance
+8. Enquiry & Dispute Forms — complaints, statement requests
+9. Closure & Nomination Forms — account closure, nominee updates
+
+---
+
+## Rebuilding Individual Services
+
+```bash
+# Rebuild kiosk frontend only
+docker compose up -d --build frontend
+
+# Rebuild admin panel only
+docker compose up -d --build admin
+
+# Rebuild backend only
+docker compose up -d --build backend
+
+# Rebuild everything
+docker compose up -d --build
+```
+
+---
+
+## Testing
+
+```bash
+npm install
+npx playwright install chromium
+
+# Kiosk connectivity + full UI walkthrough (14 tests)
+npx playwright test tests/e2e/kiosk_walkthrough.spec.js --headed --project=chromium --reporter=list
+
+# Admin UI walkthrough (48 checks)
+npx playwright test tests/e2e/walkthrough.spec.js --headed --project=chromium --reporter=list
+
+# Full admin API + UI test suite (66 tests)
+npx playwright test tests/e2e/admin.spec.js --reporter=list
+```
+
+Latest results: **48 / 48** admin walkthrough, **14 / 14** kiosk connectivity — all passing.
+
+---
+
+## Documentation
+
+Detailed docs are in the [`docs/`](docs/) folder:
+
+| File | Contents |
+|---|---|
+| `docs/01_architecture.md` | ASCII system diagram, DB schema, auth flows, tech stack |
+| `docs/02_running_app.md` | Docker commands, directory structure, env vars, debug tips |
+| `docs/03_debugging_and_fixes.md` | All 12 bugs resolved — symptoms, root cause, fix |
+| `docs/04_future_development.md` | Adding forms/languages, Whisper upgrade, production hardening |
+| `docs/05_admin_portal.md` | All 9 admin pages, API calls, roles, audit logging |
+| `docs/06_api_reference.md` | Complete endpoint reference for all routes |
+| `docs/07_testing.md` | Test suites, results, selectors, debug guide |
+
+---
+
+## License
+
+Proprietary — SAHAYAK Bank System
+
+---
+
+*Built with care for Indian banking customers 🇮🇳*
