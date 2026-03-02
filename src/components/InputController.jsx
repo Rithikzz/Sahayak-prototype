@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
-import { translations, formTemplates } from '../data/mockData';
+import { translations } from '../data/mockData';
 
 /**
  * InputController - Handles data input for selected service

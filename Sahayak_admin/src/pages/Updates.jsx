@@ -29,7 +29,7 @@ const Updates = () => {
   const fetchUpdates = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.get('/api/admin/updates');
+      const data = await api.get('/admin/updates');
       const list = (data.updates || data || []).map(u => ({
         id: u.id,
         updateName: u.update_name,
@@ -60,7 +60,7 @@ const Updates = () => {
     if (!deployUpdateName.trim()) { setDeployError('Update name is required.'); return; }
     setDeploying(true);
     try {
-      await api.post('/api/admin/updates', {
+      await api.post('/admin/updates', {
         update_name: deployUpdateName.trim(),
         update_type: deployType,
         version: selectedVersion,
@@ -78,7 +78,7 @@ const Updates = () => {
   const handleCancel = async (id) => {
     if (!window.confirm('Cancel this update?')) return;
     try {
-      await api.patch(`/api/admin/updates/${id}/cancel`);
+      await api.patch(`/admin/updates/${id}/cancel`);
       fetchUpdates();
     } catch (err) {
       alert(err.message || 'Failed to cancel update');

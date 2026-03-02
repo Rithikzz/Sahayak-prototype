@@ -10,6 +10,8 @@ import Updates from './pages/Updates';
 import Reports from './pages/Reports';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
+import Staff from './pages/Staff';
+import Submissions from './pages/Submissions';
 
 function App() {
   return (
@@ -26,8 +28,10 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="forms" element={<FormsTemplates />} />
             <Route path="kiosks" element={<Kiosks />} />
+            <Route path="staff" element={<Staff />} />
             <Route path="updates" element={<Updates />} />
             <Route path="reports" element={<Reports />} />
+            <Route path="submissions" element={<Submissions />} />
             <Route path="users" element={<Users />} />
             <Route path="settings" element={<Settings />} />
           </Route>

@@ -34,10 +34,14 @@ async function request(method, path, body = null, isFormData = false) {
   const response = await fetch(`${BASE_URL}${path}`, opts);
 
   if (response.status === 401) {
-    clearToken();
-    localStorage.removeItem('sahayak_user');
-    window.location.href = '/login';
-    return null;
+    // Don't redirect if this IS the login request (avoids wiping error state)
+    if (!path.includes('auth/login')) {
+      clearToken();
+      localStorage.removeItem('sahayak_user');
+      window.location.href = '/login';
+      return null;
+    }
+    // Fall through so the caller can handle the 401 (e.g. show error message)
   }
 
   if (!response.ok) {

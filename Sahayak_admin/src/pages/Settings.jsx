@@ -37,8 +37,8 @@ const Settings = () => {
     setLoading(true);
     try {
       const [sData, aData] = await Promise.all([
-        api.get('/api/admin/settings'),
-        api.get('/api/admin/audit-logs?limit=20'),
+        api.get('/admin/settings'),
+        api.get('/admin/audit-logs?limit=20'),
       ]);
       setSettings({ ...DEFAULTS, ...sData });
       setAuditLogs(aData.logs || aData || []);
@@ -58,7 +58,7 @@ const Settings = () => {
     setSaving(true);
     setSaveMsg('');
     try {
-      await api.put('/api/admin/settings', { settings });
+      await api.put('/admin/settings', { settings });
       setSaveMsg('Settings saved successfully.');
     } catch (err) {
       setSaveMsg('Failed to save: ' + (err.message || 'unknown error'));

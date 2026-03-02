@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
-import { translations, formTemplates } from '../data/mockData';
+import { translations } from '../data/mockData';
 
 /**
  * FieldConfirmationScreen - Read-back confirmation for last entered field
@@ -14,7 +14,8 @@ const FieldConfirmationScreen = () => {
     serviceType,
     formData,
     currentFieldIndex,
-    setCurrentFieldIndex
+    setCurrentFieldIndex,
+    formTemplates
   } = useAppState();
   
   const t = translations[language];

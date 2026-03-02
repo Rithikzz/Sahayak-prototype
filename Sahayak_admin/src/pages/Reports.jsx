@@ -24,15 +24,17 @@ const Reports = () => {
     setLoading(true);
     try {
       const [kpiData, usageData, errData, regData] = await Promise.all([
-        api.get('/api/admin/reports/kpi'),
-        api.get(`/api/admin/reports/usage?period=${period}`),
-        api.get(`/api/admin/reports/errors?period=${period}`),
-        api.get('/api/admin/reports/regions'),
+        api.get('/admin/reports/kpi'),
+        api.get(`/admin/reports/usage?period=${period}`),
+        api.get(`/admin/reports/errors?period=${period}`),
+        api.get('/admin/reports/regions'),
       ]);
       setKpi(kpiData);
-      setUsage(usageData.usage || usageData || []);
-      setErrors(errData.errors || errData || []);
-      setRegions(regData.regions || regData || []);
+      // /reports/usage returns { by_service: [...] }
+      setUsage(usageData.by_service || usageData.usage || []);
+      // /reports/errors returns { data: [...] }
+      setErrors(errData.data || errData.errors || []);
+      setRegions(regData.regions || []);
     } catch (err) {
       console.error('Reports fetch error', err);
     } finally {

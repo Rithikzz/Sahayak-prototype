@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
-import { translations, formTemplates } from '../data/mockData';
+import { translations } from '../data/mockData';
 
 /**
  * FormPreviewScreen - Read-only preview of complete form
@@ -12,7 +12,8 @@ const FormPreviewScreen = () => {
   const { 
     language, 
     serviceType,
-    formData
+    formData,
+    formTemplates
   } = useAppState();
   
   const t = translations[language];

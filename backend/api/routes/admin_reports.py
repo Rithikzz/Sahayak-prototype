@@ -110,6 +110,39 @@ def get_errors(
     }
 
 
+@router.get("/submissions")
+def get_submissions(
+    limit: int = 50,
+    offset: int = 0,
+    service_type: str = None,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """List form submissions from kiosks with pagination."""
+    from api.models import StaffUser, Customer
+    query = db.query(FormSubmission)
+    if service_type:
+        query = query.filter(FormSubmission.service_type == service_type)
+    total = query.count()
+    rows = query.order_by(FormSubmission.created_at.desc()).offset(offset).limit(limit).all()
+
+    def fmt(sub):
+        customer = db.query(Customer).filter(Customer.id == sub.customer_id).first() if sub.customer_id else None
+        verifier = db.query(StaffUser).filter(StaffUser.id == sub.verified_by_staff_id).first() if sub.verified_by_staff_id else None
+        return {
+            "id": sub.id,
+            "service_type": sub.service_type,
+            "status": sub.status,
+            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+            "account_number": customer.account_number if customer else None,
+            "phone_number": customer.phone_number if customer else None,
+            "verified_by": verifier.name if verifier else None,
+            "form_data": sub.form_data,
+        }
+
+    return {"total": total, "submissions": [fmt(s) for s in rows]}
+
+
 @router.get("/regions")
 def get_regions(
     db: Session = Depends(get_db),

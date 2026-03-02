@@ -6,7 +6,7 @@ import bcrypt
 
 from api.database import engine, Base, get_db
 from api.routes import auth, forms, voice
-from api.routes import admin_auth, admin_users, admin_kiosks, admin_forms, admin_updates, admin_reports, admin_settings
+from api.routes import admin_auth, admin_users, admin_kiosks, admin_forms, admin_updates, admin_reports, admin_settings, admin_staff
 from api.routes.admin_kiosks import kiosk_device_router
 from api.routes.admin_updates import kiosk_update_router
 from api import models
@@ -42,6 +42,7 @@ app.include_router(admin_forms.router, prefix="/api/admin/forms", tags=["Admin F
 app.include_router(admin_updates.router, prefix="/api/admin/updates", tags=["Admin Updates"])
 app.include_router(admin_reports.router, prefix="/api/admin/reports", tags=["Admin Reports"])
 app.include_router(admin_settings.router, prefix="/api/admin", tags=["Admin Settings"])
+app.include_router(admin_staff.router, prefix="/api/admin/staff", tags=["Admin Staff"])
 
 
 @app.get("/health")
