@@ -1,50 +1,346 @@
-# SAHAYAK Kiosk System Architecture
+# SAHAYAK Kiosk System — Architecture
 
-This document provides a high-level overview of the SAHAYAK Kiosk's microservices architecture. The system is designed for high availability, specialized AI voice workloads, and containerized deployment parity.
+## Overview
 
-## The 5-Container Ecosystem
+SAHAYAK is a fully containerised banking kiosk system built for Indian bank branches.
+It allows customers with low digital literacy to fill out banking forms using voice or
+touch input, guided by an AI‑powered multilingual assistant.  A separate admin portal
+lets bank managers manage kiosks, staff, form templates, OTA updates, and submissions.
 
-The SAHAYAK application relies on 5 independent Docker containers, orchestrated by Docker Compose:
+---
 
-### 1. Nginx Frontend (`sahayak_frontend`)
-* **Role**: Serves the optimized Vite/React static assets to the kiosk client.
-* **Network Strategy**: Exposes Port 80. Acts as the single entry point. Contains a Reverse Proxy (`/api/`) which seamlessly tunnels all API requests to the Python Backend, completely avoiding CORS setup and making development simple.
+## 7-Container Docker Architecture
 
-### 2. Python Core API (`sahayak_backend`)
-* **Role**: The central "brain" connecting the frontend forms to database rows, user auth, and AI. Built with **FastAPI**.
-* **Database interaction**: Connects to PostgreSQL using `psycopg2` + `SQLAlchemy` ORM. Handles JWT auth logic and `JSONB` serialization for forms.
-* **Microservice interaction**: Proxies audio bytes to STT, proxies text strings to TTS. Uses asynchronous `httpx` to avoid waiting blocks.
-
-### 3. Speech-to-Text (`sahayak_stt`)
-* **Role**: The AI listener. Runs OpenAI's `whisper-base` model locally within Python.
-* **Behavior**: Pre-loads the neural network straight into GPU/CPU memory on boot. Has `ffmpeg` installed via Dockerfile to decode incoming WebM microphone blobs. Transcribes bytes cleanly and returns JSON strings.
-
-### 4. Text-to-Speech (`sahayak_tts`)
-* **Role**: The Kiosk voice. Runs Google TTS (`gTTS`). 
-* **Behavior**: Receives UI string prompts and requested languages (`en`, `hi`, `ta`), generates `.mp3` payloads dynamically, and streams them out.
-
-### 5. PostgreSQL Database (`sahayak_db`)
-* **Role**: Persistent Storage. Using `postgres:15-alpine`.
-* **Behavior**: Uses a Docker volume map (`postgres_data`) to prevent losing form submissions across container restarts.
-
-## System Diagram
-
-```mermaid
-graph TD
-    User([Kiosk User/MIC]) -->|Port 80 HTTP| Nginx[Frontend: Nginx + React]
-    
-    Nginx -->|/assets/*| React(Static Files)
-    Nginx -->|/api/* (Reverse Proxy)| FastAPI_Core[Backend: FastAPI Core]
-    
-    FastAPI_Core -->|Reads/Writes Form JSON| Postgres[(PostgreSQL DB)]
-    
-    FastAPI_Core -->|Sends generic text/lang| TTS[Microservice: Google TTS]
-    TTS -->|Streams MP3 audio| FastAPI_Core
-    
-    FastAPI_Core -->|Forwards WebM audio blob| STT[Microservice: Whisper STT]
-    STT -->|Returns pure text strings| FastAPI_Core
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                           SAHAYAK SYSTEM                                    ║
+║                        docker compose up -d                                  ║
+║                                                                              ║
+║  ┌─────────────────┐  Port 80    ┌──────────────────────────────────────┐   ║
+║  │  Kiosk Browser  │────────────▶│  sahayak_frontend  (Nginx + React)   │   ║
+║  │  http://        │             │  /assets/* → React static files      │   ║
+║  │  localhost      │             │  /api/*    → proxy → backend:5000    │   ║
+║  └─────────────────┘             └─────────────────┬────────────────────┘   ║
+║                                                    │                        ║
+║  ┌─────────────────┐  Port 8080  ┌────────────────────────────────────────┐ ║
+║  │  Admin Browser  │────────────▶│  sahayak_admin  (Nginx + React)        │ ║
+║  │  http://        │             │  /assets/* → React static files        │ ║
+║  │  localhost:8080 │             │  /api/*    → proxy → backend:5000      │ ║
+║  └─────────────────┘             └─────────────────┬──────────────────────┘ ║
+║                                                    │                        ║
+║                              ┌─────────────────────▼──────────────────────┐ ║
+║                              │  sahayak_backend  (FastAPI / Uvicorn)       │ ║
+║                              │  Port 5000                                  │ ║
+║                              │  • JWT auth  (staff 12h + admin 24h)        │ ║
+║                              │  • SQLAlchemy ORM                           │ ║
+║                              │  • Kiosk routes + Admin routes              │ ║
+║                              │  • Startup seed (admin, templates, settings)│ ║
+║                              └────────┬──────────┬───────────┬─────────────┘ ║
+║                                       │          │           │               ║
+║                  ┌────────────────────▼──┐  ┌───▼───┐  ┌───▼──────────┐    ║
+║                  │  sahayak_db           │  │  stt  │  │  tts  + ocr  │    ║
+║                  │  PostgreSQL 15-alpine  │  │ :8001 │  │ :8002  :8003 │    ║
+║                  │  Port 5432             │  │Whisper│  │gTTS + OCR    │    ║
+║                  │  Volume: postgres_data │  │ base  │  │              │    ║
+║                  └───────────────────────┘  └───────┘  └──────────────┘    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
-## Technical Debt / Important Notes
-* The STT container uses `whisper-base` which heavily benefits from actual GPU compute instances in production. CPU processing (current state) runs fine but takes 1.5 - 2s to transcribe 5s clips.
-* For actual banking deployment, ensure `JWT_SECRET` inside `docker-compose.yml` is rotated properly.
+---
+
+## Container Reference
+
+| Container           | Build Source          | Port | Role                                    |
+|---------------------|-----------------------|------|-----------------------------------------|
+| `sahayak_db`        | `postgres:15-alpine`  | 5432 | Persistent relational store             |
+| `sahayak_backend`   | `./backend`           | 5000 | FastAPI — all business logic + auth     |
+| `sahayak_frontend`  | `.` (root Dockerfile) | 80   | Kiosk React UI served by Nginx          |
+| `sahayak_admin`     | `./Sahayak_admin`     | 8080 | Admin portal React UI served by Nginx   |
+| `sahayak_stt`       | `./microservices/stt` | 8001 | Speech-to-Text (Whisper base)           |
+| `sahayak_tts`       | `./microservices/tts` | 8002 | Text-to-Speech (gTTS, en/hi/ta)         |
+| `sahayak_ocr`       | `./microservices/ocr` | 8003 | OCR — scans physical document images    |
+
+---
+
+## Kiosk User Flow (ASCII)
+
+```
+  CUSTOMER AT KIOSK  http://localhost
+  ════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────┐
+  │  WelcomeScreen  (PUBLIC)            │
+  │  Select Language: EN / HI / TA      │
+  │  "Touch to Start"                   │
+  └──────────────────┬──────────────────┘
+                     │
+  ┌──────────────────▼──────────────────┐
+  │  AuthenticationScreen  (PUBLIC)     │
+  │  Enter Account Number (≥10 digits)  │
+  │  Enter 4-digit PIN                  │
+  │  → POST /api/auth/staff-login       │
+  └──────────────────┬──────────────────┘
+                     │
+  ┌──────────────────▼──────────────────┐
+  │  OTPVerificationScreen  (PUBLIC)    │
+  │  6-digit OTP (simulated verify)     │
+  │  setAuthPassed(true)  ← gate opens  │
+  └──────────────────┬──────────────────┘
+                     │ 3s auto-advance
+  ┌──────────────────▼──────────────────┐
+  │  AuthSuccessScreen  (PUBLIC)        │
+  │  "Authentication Successful!"       │
+  └──────────────────┬──────────────────┘
+                     │ 3s auto-advance
+  ╔══════════════════▼═══════════════════╗  ← ProtectedRoute gate
+  ║  ModeSelectionScreen  (PROTECTED)   ║
+  ║  Voice + IVR  /  Touch  /  Assisted ║
+  ╚══════════════════╦═══════════════════╝
+                     ║
+  ╔══════════════════▼═══════════════════╗
+  ║  ServiceSelectionScreen (PROTECTED) ║
+  ║  9 service categories               ║
+  ║  → GET /api/forms/templates         ║
+  ╚══════════════════╦═══════════════════╝
+                     ║
+  ╔══════════════════▼═══════════════════╗
+  ║  InputController  (PROTECTED)       ║
+  ║  One field at a time                ║
+  ║  VOICE: TTS → open mic → STT        ║
+  ║    POST /api/voice/synthesize       ║
+  ║    POST /api/voice/transcribe       ║
+  ║  TOUCH: on-screen keypad            ║
+  ╚══════════════════╦═══════════════════╝
+                     ║
+  ╔══════════════════▼═══════════════════╗
+  ║  FieldConfirmationScreen (PROTECTED)║
+  ║  Review single field, confirm/retry ║
+  ╚══════════════════╦═══════════════════╝
+                     ║
+  ╔══════════════════▼═══════════════════╗
+  ║  FormPreviewScreen  (PROTECTED)     ║
+  ║  Full form summary before submit    ║
+  ╚══════════════════╦═══════════════════╝
+                     ║
+  ╔══════════════════▼═══════════════════╗
+  ║  HumanVerificationScreen (PROTECTED)║
+  ║  Staff enters 4-digit PIN           ║
+  ║  → POST /api/forms/submit           ║
+  ║    { service_type, form_data,       ║
+  ║      staff_pin, account_number }    ║
+  ║  Authorization: Bearer <staff JWT>  ║
+  ╚══════════════════╦═══════════════════╝
+                     ║
+  ╔══════════════════▼═══════════════════╗
+  ║  SuccessScreen  (PROTECTED)         ║
+  ║  Auto-reset state after session     ║
+  ╚══════════════════════════════════════╝
+```
+
+---
+
+## Admin Portal Flow (ASCII)
+
+```
+  BANK MANAGER  http://localhost:8080
+  ════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────┐
+  │  Login Page  (PUBLIC)               │
+  │  Email + Password                   │
+  │  → POST /api/admin/auth/login       │
+  │  ← 24hr Admin JWT                   │
+  └──────────────────┬──────────────────┘
+                     │
+  ╔══════════════════▼═══════════════════╗  ← ProtectedRoute (admin JWT)
+  ║  Layout (Sidebar + Header)          ║
+  ║                                     ║
+  ║  ┌─────────┐  Sidebar navigation:   ║
+  ║  │ Sahayak │  • Dashboard           ║
+  ║  │ (brand) │  • Kiosks              ║
+  ║  │         │  • Staff               ║
+  ║  │         │  • Reports             ║
+  ║  │         │  • OTA Updates         ║
+  ║  │         │  • Forms & Templates   ║
+  ║  │         │  • Submissions         ║
+  ║  │         │  • Admin Users         ║
+  ║  └─────────┘  • Settings            ║
+  ╚══════════════════════════════════════╝
+            │
+            ├─▶ Dashboard    → GET /reports/kpi, /reports/usage, /reports/errors
+            ├─▶ Kiosks       → GET /admin/kiosks   (live status via heartbeat)
+            ├─▶ Staff        → GET /admin/staff     CRUD staff + PIN reset
+            ├─▶ Reports      → GET /reports/usage, /errors, /regions, /submissions
+            ├─▶ OTA Updates  → GET/POST /admin/updates  push firmware/app updates
+            ├─▶ Forms        → GET/POST/PUT /admin/forms  visual field builder
+            ├─▶ Submissions  → GET /admin/reports/submissions  filter + search
+            ├─▶ Admin Users  → GET/POST /admin/users  manage admin accounts
+            └─▶ Settings     → GET/PUT /admin/settings  system configuration
+```
+
+---
+
+## API Request Flow
+
+```
+  BROWSER (kiosk port 80 or admin port 8080)
+       │
+       │  fetch('/api/forms/templates')
+       │  All requests use relative paths — no hardcoded backend URLs
+       │
+       ▼
+  NGINX (inside Docker container)
+       │
+       │  location /api/ {
+       │      proxy_pass http://backend:5000/api/;
+       │      proxy_set_header Host $host;
+       │  }
+       │
+       ▼
+  FASTAPI BACKEND  (backend:5000, internal)
+       │
+       ├──── SQLAlchemy ORM ──────────▶ PostgreSQL (db:5432)
+       │     models.py: StaffUser, Customer, FormSubmission,
+       │     AdminUser, Kiosk, FormTemplateMetadata,
+       │     OTAUpdate, SystemSetting, AuditLog
+       │
+       ├──── httpx async ─────────────▶ STT (stt:8001)
+       │     POST /transcribe
+       │     body: WebM audio blob
+       │     response: { text, language }
+       │
+       ├──── httpx async ─────────────▶ TTS (tts:8002)
+       │     POST /synthesize
+       │     body: { text, lang }
+       │     response: MP3 audio bytes
+       │
+       └──── httpx async ─────────────▶ OCR (ocr:8003)
+             POST /ocr
+             body: image file
+             response: extracted text
+```
+
+---
+
+## Database Schema
+
+```
+  DATABASE: sahayak  (PostgreSQL 15)
+  ══════════════════════════════════════════════════════════════
+
+  staff_users
+  ┌──────┬──────────┬──────────┬──────────┬────────────┐
+  │ id   │pin_hash  │ name     │ role     │ created_at │
+  │ PK   │VARCHAR   │ VARCHAR  │ VARCHAR  │ TIMESTAMP  │
+  └──────┴──────────┴──────────┴──────────┴────────────┘
+
+  customers ──── 1:N ───▶ form_submissions
+  ┌──────┬────────────────┬──────────┐     ┌──────┬─────────────┬────────────┬──────────┬────────┐
+  │ id   │account_number  │ phone    │     │ id   │ customer_id │service_type│form_data │ status │
+  │ PK   │UNIQUE VARCHAR  │ VARCHAR  │     │ PK   │ FK→customers│ VARCHAR    │ JSON     │VARCHAR │
+  └──────┴────────────────┴──────────┘     └──────┴─────────────┴────────────┴──────────┴────────┘
+
+  admin_users
+  ┌──────┬─────────────┬──────────┬──────────────┬──────────┬────────────┬────────┐
+  │ id   │ email       │ name     │ role         │ region   │permissions │ status │
+  │ PK   │ UNIQUE      │ VARCHAR  │ VARCHAR(50)  │ VARCHAR  │ JSON array │VARCHAR │
+  └──────┴─────────────┴──────────┴──────────────┴──────────┴────────────┴────────┘
+         │ 1:N
+         ▼
+  audit_logs
+  ┌──────┬──────────────┬────────────┬───────────┬──────────┬────────────┐
+  │ id   │admin_user_id │ action     │ resource  │ detail   │ timestamp  │
+  │ PK   │ FK→admin     │ VARCHAR    │ VARCHAR   │ JSON     │ TIMESTAMP  │
+  └──────┴──────────────┴────────────┴───────────┴──────────┴────────────┘
+
+  kiosks
+  ┌──────┬───────────┬─────────────┬─────────┬────────────────┬────────────────┐
+  │ id   │ device_id │ branch_name │ region  │ last_heartbeat │installed_version│
+  │ PK   │ UNIQUE    │ VARCHAR     │ VARCHAR │ TIMESTAMP      │ VARCHAR         │
+  └──────┴───────────┴─────────────┴─────────┴────────────────┴─────────────────┘
+
+  form_template_metadata
+  ┌──────┬──────┬──────────┬─────────┬──────────┬──────────────────────┐
+  │ id   │ name │ category │ version │ status   │ field_definitions    │
+  │ PK   │ STR  │ VARCHAR  │ INT     │ VARCHAR  │ JSON array of fields │
+  └──────┴──────┴──────────┴─────────┴──────────┴──────────────────────┘
+
+  ota_updates
+  ┌──────┬─────────┬─────────────┬──────────┬──────────┐
+  │ id   │ version │ update_name │ status   │ target   │
+  │ PK   │ VARCHAR │ VARCHAR     │ VARCHAR  │ JSON     │
+  └──────┴─────────┴─────────────┴──────────┴──────────┘
+
+  system_settings
+  ┌──────┬──────────────┬─────────────────┐
+  │ id   │ key          │ value           │
+  │ PK   │ VARCHAR UNIQ │ JSON            │
+  └──────┴──────────────┴─────────────────┘
+```
+
+---
+
+## Authentication Flows
+
+```
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  FLOW 1 — Kiosk Staff Auth  (12-hour JWT)                       │
+  │                                                                 │
+  │  Kiosk UI                Backend                  DB            │
+  │     │                       │                     │            │
+  │     │ POST /api/auth/        │                     │            │
+  │     │   staff-login          │                     │            │
+  │     │  { pin: "1234" }       │                     │            │
+  │     │──────────────────────▶│                     │            │
+  │     │                       │ SELECT * FROM        │            │
+  │     │                       │ staff_users ────────▶│            │
+  │     │                       │ bcrypt.checkpw()     │            │
+  │     │                       │◀────────────────────│            │
+  │     │◀──────────────────────│                     │            │
+  │     │ { access_token,        │                     │            │
+  │     │   staff_name }         │                     │            │
+  │     │                       │                     │            │
+  │     │ Store in localStorage  │                     │            │
+  │     │ Use as Bearer token    │                     │            │
+  │     │ on /api/forms/submit   │                     │            │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  FLOW 2 — Admin Portal Auth  (24-hour JWT)                      │
+  │                                                                 │
+  │  Admin UI               Backend                    DB           │
+  │     │                      │                       │           │
+  │     │ POST /api/admin/      │                       │           │
+  │     │   auth/login          │                       │           │
+  │     │  { email, password }  │                       │           │
+  │     │─────────────────────▶│                       │           │
+  │     │                      │ SELECT FROM admin_users│           │
+  │     │                      │ bcrypt.checkpw() ─────▶│           │
+  │     │                      │◀──────────────────────│           │
+  │     │◀─────────────────────│                       │           │
+  │     │ { access_token, admin }                       │           │
+  │     │                      │                       │           │
+  │     │ Store in localStorage │                       │           │
+  │     │ apiClient auto-injects│                       │           │
+  │     │ Bearer on all /admin/ │                       │           │
+  │     │ requests              │                       │           │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Technology Stack
+
+| Layer           | Technology                                    |
+|-----------------|-----------------------------------------------|
+| Kiosk Frontend  | React 18.2, React Router 6, CSS custom vars   |
+| Admin Frontend  | React 18.2, TailwindCSS 3, Vite 4, Chart.js   |
+| Backend API     | Python 3.11, FastAPI, SQLAlchemy 2, Uvicorn   |
+| Database        | PostgreSQL 15 (Alpine), psycopg2              |
+| Auth            | python-jose (JWT HS256), bcrypt               |
+| STT             | OpenAI Whisper (base model), ffmpeg           |
+| TTS             | gTTS (Google Text-to-Speech, en/hi/ta)        |
+| OCR             | FastAPI + image processing (ocr:8003)         |
+| Container Orch  | Docker Engine + Docker Compose                |
+| Reverse Proxy   | Nginx (Alpine) — static serve + /api proxy    |
+| Testing         | Playwright (Node.js), Chromium                |
