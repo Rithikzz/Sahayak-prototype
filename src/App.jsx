@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AppStateProvider } from './context/AppStateContext';
+import { AppStateProvider, useAppState } from './context/AppStateContext';
 
 // Import screen components
 import WelcomeScreen from './components/WelcomeScreen';
@@ -18,6 +18,31 @@ import SuccessScreen from './components/SuccessScreen';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import './App.css';
+
+// OTA update notification banner (shown when a new version is available)
+const OtaBanner = () => {
+  const { pendingUpdate, setPendingUpdate } = useAppState();
+  if (!pendingUpdate) return null;
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+      background: '#1e40af', color: '#fff', padding: '10px 20px',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      fontSize: '14px',
+    }}>
+      <span>
+        🔔 Update available: <strong>{pendingUpdate.update_name}</strong> (v{pendingUpdate.version}).
+        This device will update on next restart.
+      </span>
+      <button
+        onClick={() => setPendingUpdate(null)}
+        style={{ background: 'none', border: '1px solid #fff', color: '#fff', borderRadius: '4px', padding: '2px 10px', cursor: 'pointer' }}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+};
 
 /**
  * Main App Component - SAHAYAK Banking Kiosk System
@@ -50,6 +75,7 @@ import './App.css';
 function App() {
   return (
     <AppStateProvider>
+      <OtaBanner />
       <Router>
         <Routes>
           {/* Welcome screen - language selection (PUBLIC) */}

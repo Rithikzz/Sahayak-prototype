@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+backend
+microservices
+Sahayak_admin
+.env
+.env.*
+*.bat
+*.ps1
+*.py
+docker-compose.yml

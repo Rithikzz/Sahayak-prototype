@@ -117,8 +117,13 @@ FORM_TEMPLATES = {
 }
 
 @router.get("/templates")
-def get_form_templates():
-    """Returns the JSON templates for all form categories"""
+def get_form_templates(db: Session = Depends(get_db)):
+    """Return published form templates from DB. Falls back to hardcoded if DB is empty."""
+    from api.models import FormTemplateMetadata
+    templates = db.query(FormTemplateMetadata).filter(FormTemplateMetadata.status == "Published").all()
+    if templates:
+        return {t.category: {"fields": t.field_definitions} for t in templates}
+    # Fallback to hardcoded during first boot (before seed runs)
     return FORM_TEMPLATES
 
 @router.post("/submit")

@@ -1,7 +1,19 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 
 // Central state management for kiosk application
 const AppStateContext = createContext();
+
+// ── Device ID ─────────────────────────────────────────────────────────────────
+const getDeviceId = () => {
+  let id = localStorage.getItem('sahayak_device_id');
+  if (!id) {
+    id = 'kiosk-' + Math.random().toString(36).slice(2, 10) + '-' + Date.now();
+    localStorage.setItem('sahayak_device_id', id);
+  }
+  return id;
+};
+
+const KIOSK_VERSION = '1.0.0';
 
 export const useAppState = () => {
   const context = useContext(AppStateContext);
@@ -76,6 +88,57 @@ export const AppStateProvider = ({ children }) => {
   // Token for backend requests
   const [authToken, setAuthToken] = useState(localStorage.getItem('sahayak_token') || null);
   const [staffName, setStaffName] = useState(localStorage.getItem('sahayak_staff_name') || '');
+
+  // ── OTA & Heartbeat ─────────────────────────────────────────────────────────
+  const [deviceId] = useState(getDeviceId);
+  const [formsTodayCount, setFormsTodayCount] = useState(0);
+  const [pendingUpdate, setPendingUpdate] = useState(null); // { version, update_name }
+  const heartbeatRef = useRef(null);
+
+  // Check for pending OTA update once on mount
+  useEffect(() => {
+    const checkUpdate = async () => {
+      try {
+        const res = await fetch(`/api/kiosk/pending-update?device_id=${encodeURIComponent(deviceId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.has_update) setPendingUpdate(data);
+        }
+      } catch (_) { /* non-critical */ }
+    };
+    checkUpdate();
+  }, [deviceId]);
+
+  // Send heartbeat every 60 seconds while staff is logged in
+  const sendHeartbeat = useCallback(async () => {
+    try {
+      await fetch('/api/kiosk/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_id: deviceId,
+          installed_version: KIOSK_VERSION,
+          forms_today: formsTodayCount,
+          ip_address: null,
+        }),
+      });
+    } catch (_) { /* non-critical */ }
+  }, [deviceId, formsTodayCount]);
+
+  useEffect(() => {
+    if (authPassed) {
+      sendHeartbeat(); // immediate on login
+      heartbeatRef.current = setInterval(sendHeartbeat, 60_000);
+    } else {
+      clearInterval(heartbeatRef.current);
+    }
+    return () => clearInterval(heartbeatRef.current);
+  }, [authPassed, sendHeartbeat]);
+
+  // Increment forms counter after each successful submission
+  const incrementFormsToday = useCallback(() => {
+    setFormsTodayCount(c => c + 1);
+  }, []);
 
   // Validate staff PIN against backend API
   const validateStaffPin = async (pin) => {
@@ -175,7 +238,13 @@ export const AppStateProvider = ({ children }) => {
     clearAuthState,
     resetState,
     formTemplates,
-    isLoadingTemplates
+    isLoadingTemplates,
+    // OTA / heartbeat
+    deviceId,
+    pendingUpdate,
+    setPendingUpdate,
+    formsTodayCount,
+    incrementFormsToday,
   };
 
   return (

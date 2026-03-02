@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import bcrypt
@@ -40,11 +40,28 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# Dependency to verify token
-def get_current_staff(token: str = Depends(lambda: None), db: Session = Depends(get_db)):
-    # In a real app we'd use OAuth2PasswordBearer, but to keep headers simple for now
-    # We will pass token in Authorization header manually if needed
-    pass
+def get_current_staff(request: Request, db: Session = Depends(get_db)) -> StaffUser:
+    """Decode the staff JWT from the Authorization header and return the StaffUser."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate staff credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise credentials_exception
+    token = auth_header[len("Bearer "):]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        staff_id: str = payload.get("sub")
+        if staff_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    staff = db.query(StaffUser).filter(StaffUser.id == int(staff_id)).first()
+    if staff is None:
+        raise credentials_exception
+    return staff
 
 @router.post("/staff-login", response_model=Token)
 def staff_login(request: StaffLoginRequest, db: Session = Depends(get_db)):
