@@ -5,3 +5,7 @@ __pycache__
 .env.*
 .git
 *.md
+venv/
+app/__pycache__
+data/
+logs/

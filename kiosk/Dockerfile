@@ -19,16 +19,21 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # or we can put a default one here. Let's create a default one directly.
 RUN echo 'server { \
     listen 80; \
+    client_max_body_size 50m; \
     location / { \
         root /usr/share/nginx/html; \
         index index.html index.htm; \
         try_files $uri $uri/ /index.html =404; \
     } \
     location /api/ { \
-        proxy_pass http://backend:5000/api/; \
+        proxy_pass http://backend:5000; \
+        proxy_http_version 1.1; \
         proxy_set_header Host $host; \
         proxy_set_header X-Real-IP $remote_addr; \
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; \
+        proxy_request_buffering off; \
+        proxy_read_timeout 120s; \
+        proxy_send_timeout 120s; \
     } \
 }' > /etc/nginx/conf.d/default.conf
 

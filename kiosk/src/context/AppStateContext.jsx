@@ -85,6 +85,32 @@ export const AppStateProvider = ({ children }) => {
   const [authPassed, setAuthPassed] = useState(false);
   const [staffLoginPin, setStaffLoginPin] = useState('');
 
+  // Customer profile (set after successful customer-verify)
+  const [customerProfile, setCustomerProfile] = useState(null);
+
+  // Selected form template DB id (for PDF generation)
+  const [selectedFormTemplateId, setSelectedFormTemplateId] = useState(null);
+
+  // Wrap setServiceType so we also capture the template ID from formTemplates
+  // Always auto-selects the most recently published template (highest id) —
+  // no template picker screen is shown.
+  const selectServiceType = (type) => {
+    setServiceType(type);
+    const tplArr = formTemplates[type];
+    if (Array.isArray(tplArr) && tplArr.length > 0) {
+      // Pick the template with the highest id (most recently created/published)
+      const latest = tplArr.reduce((best, t) => t.id > best.id ? t : best, tplArr[0]);
+      setSelectedFormTemplateId(latest.id);
+    } else if (tplArr && !Array.isArray(tplArr) && tplArr.id) {
+      setSelectedFormTemplateId(tplArr.id);
+    }
+  };
+
+  // Select a specific template by id (used by FormTemplatePicker)
+  const selectTemplate = (templateId) => {
+    setSelectedFormTemplateId(templateId);
+  };
+
   // Token for backend requests
   const [authToken, setAuthToken] = useState(localStorage.getItem('sahayak_token') || null);
   const [staffName, setStaffName] = useState(localStorage.getItem('sahayak_staff_name') || '');
@@ -172,6 +198,46 @@ export const AppStateProvider = ({ children }) => {
     }));
   };
 
+  // Pre-fill formData with known customer profile fields
+  const prefillFromProfile = (profile) => {
+    if (!profile) return;
+    setFormData(prev => ({
+      ...prev,
+      // Map profile keys to canonical form field IDs
+      fullName: prev.fullName || profile.name || '',
+      depositorName: prev.depositorName || profile.name || '',
+      accountNumber: prev.accountNumber || profile.account_number || '',
+      phoneNumber: prev.phoneNumber || profile.phone_number || '',
+      emailId: prev.emailId || profile.email || '',
+      dateOfBirth: prev.dateOfBirth || profile.date_of_birth || '',
+      panNumber: prev.panNumber || profile.pan_number || '',
+      aadharNumber: prev.aadharNumber || profile.aadhaar_number || '',
+      address: prev.address || profile.address || '',
+    }));
+  };
+
+  // Verify customer by account number + PIN; pre-fill form data on success
+  const verifyCustomer = async (acctNumber, customerPin) => {
+    try {
+      const response = await fetch('/api/auth/customer-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_number: acctNumber, pin: customerPin }),
+      });
+      if (response.ok) {
+        const profile = await response.json();
+        setCustomerProfile(profile);
+        prefillFromProfile(profile);
+        return { success: true, profile };
+      }
+      const err = await response.json().catch(() => ({}));
+      return { success: false, error: err.detail || 'Verification failed' };
+    } catch (error) {
+      console.error('Customer verify error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  };
+
   // Clear authentication state
   const clearAuthState = () => {
     setAuthPassed(false);
@@ -197,6 +263,8 @@ export const AppStateProvider = ({ children }) => {
     setCurrentFieldIndex(0);
     setVerificationStatus('pending');
     setStaffPin('');
+    setCustomerProfile(null);
+    setSelectedFormTemplateId(null);
     clearAuthState();
   };
 
@@ -237,6 +305,14 @@ export const AppStateProvider = ({ children }) => {
     staffName,
     clearAuthState,
     resetState,
+    // Customer auth
+    customerProfile,
+    setCustomerProfile,
+    verifyCustomer,
+    // Form template selection
+    selectedFormTemplateId,
+    selectServiceType,
+    selectTemplate,
     formTemplates,
     isLoadingTemplates,
     // OTA / heartbeat

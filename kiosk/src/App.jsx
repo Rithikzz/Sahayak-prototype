@@ -15,6 +15,7 @@ import FormPreviewScreen from './components/FormPreviewScreen';
 import VoiceVerificationScreen from './components/VoiceVerificationScreen';
 import HumanVerificationScreen from './components/HumanVerificationScreen';
 import SuccessScreen from './components/SuccessScreen';
+import FormTemplatePicker from './components/FormTemplatePicker';
 import ProtectedRoute from './components/ProtectedRoute';
 
 import './App.css';
@@ -100,6 +101,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <ServiceSelectionScreen />
+              </ProtectedRoute>
+            } 
+          />
+
+          {/* Template picker - when category has multiple forms (PROTECTED) */}
+          <Route 
+            path="/template-picker" 
+            element={
+              <ProtectedRoute>
+                <FormTemplatePicker />
               </ProtectedRoute>
             } 
           />

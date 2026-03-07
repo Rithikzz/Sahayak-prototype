@@ -5,6 +5,7 @@ import Badge from '../components/Badge';
 import Button from '../components/Button';
 import Modal from '../components/Modal';
 import api from '../utils/apiClient';
+import PdfFieldEditor from '../components/PdfFieldEditor';
 
 // ---- Constants ---------------------------------------------------------------
 
@@ -171,6 +172,10 @@ const FormsTemplates = () => {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState('');
   const [ocrRawText, setOcrRawText] = useState('');
+  const [ocrCoordinates, setOcrCoordinates] = useState({});    // { field_id: {page,x,y,...} }
+  const [ocrOriginalPdf, setOcrOriginalPdf] = useState(null);  // legacy base64
+  const [ocrPdfFilename, setOcrPdfFilename] = useState(null);  // disk-based filename
+  const [ocrPdfUrl, setOcrPdfUrl] = useState(null);            // URL for PDF viewer
   const fileInputRef = useRef(null);
 
   // Fetch forms
@@ -203,6 +208,9 @@ const FormsTemplates = () => {
     publishedDate: f.published_at,
     description: f.description || '',
     field_definitions: f.field_definitions,
+    field_coordinates: f.field_coordinates,
+    has_pdf: f.has_pdf,
+    pdf_filename: f.pdf_filename,
   });
 
   const normalised = formsData.map(norm);
@@ -259,6 +267,23 @@ const FormsTemplates = () => {
     setOcrFile(null);
     setOcrRawText('');
     setOcrError('');
+    // Load existing coordinate data from the server
+    const rawForm = formsData.find(f => f.id === form.id);
+    const existingCoords = rawForm?.field_coordinates;
+    if (existingCoords && typeof existingCoords === 'object' && Object.keys(existingCoords).length > 0) {
+      setOcrCoordinates(typeof existingCoords === 'string' ? JSON.parse(existingCoords) : existingCoords);
+    } else {
+      setOcrCoordinates({});
+    }
+    // Set PDF URL for the visual editor
+    if (rawForm?.has_pdf) {
+      setOcrPdfUrl(`/api/admin/forms/${form.id}/pdf`);
+      setOcrPdfFilename(rawForm.pdf_filename || null);
+    } else {
+      setOcrPdfUrl(null);
+      setOcrPdfFilename(null);
+    }
+    setOcrOriginalPdf(null);
     setShowCreateModal(true);
   };
 
@@ -272,6 +297,10 @@ const FormsTemplates = () => {
     setOcrFile(null);
     setOcrRawText('');
     setOcrError('');
+    setOcrCoordinates({});
+    setOcrOriginalPdf(null);
+    setOcrPdfFilename(null);
+    setOcrPdfUrl(null);
     setShowCreateModal(true);
   };
 
@@ -299,7 +328,11 @@ const FormsTemplates = () => {
     setOcrError('');
     setOcrRawText('');
     try {
-      const result = await api.upload('/admin/forms/ocr', ocrFile);
+      // Wrap file in FormData for proper multipart/form-data request
+      const formData = new FormData();
+      formData.append('file', ocrFile);
+      
+      const result = await api.upload('/admin/forms/ocr', formData);
       const detected = Array.isArray(result.detected_fields) ? result.detected_fields : [];
       if (detected.length > 0) {
         const rows = detected.map(f => ({
@@ -310,12 +343,35 @@ const FormsTemplates = () => {
         }));
         setFieldRows(rows);
         setOcrRawText(result.raw_text || '');
-        setOcrTab('builder'); // switch to builder tab to show populated fields
+        // Store coordinates for the visual editor
+        if (result.field_coordinates && Object.keys(result.field_coordinates).length > 0) {
+          setOcrCoordinates(result.field_coordinates);
+        }
+        // Store PDF reference (disk-based filename)
+        if (result.pdf_filename) {
+          setOcrPdfFilename(result.pdf_filename);
+          setOcrPdfUrl(result.pdf_temp_url || `/api/admin/forms/temp-pdf/${result.pdf_filename}`);
+        } else if (result.original_pdf_base64) {
+          // Legacy fallback
+          setOcrOriginalPdf(result.original_pdf_base64);
+        }
+        setOcrTab('builder');
       } else {
         setOcrError('No fields detected. Try a clearer scan or add fields manually.');
       }
     } catch (err) {
-      setOcrError(err.message || 'OCR extraction failed.');
+      // Guarantee ocrError is always a plain readable string
+      let msg = 'OCR extraction failed. Please try again.';
+      try {
+        if (err instanceof Error) {
+          msg = err.message || msg;
+        } else if (typeof err === 'string') {
+          msg = err;
+        } else if (err && typeof err === 'object') {
+          msg = JSON.stringify(err);
+        }
+      } catch (_) {}
+      setOcrError(typeof msg === 'string' ? msg : JSON.stringify(msg));
     } finally {
       setOcrLoading(false);
     }
@@ -337,6 +393,9 @@ const FormsTemplates = () => {
         category: formDraft.category,
         languages: formDraft.languages.split(',').map(l => l.trim()).filter(Boolean),
         field_definitions: fieldRows.map(({ id, label, type, required }) => ({ id, label, type, required })),
+        ...(ocrCoordinates && Object.keys(ocrCoordinates).length > 0 ? { field_coordinates: ocrCoordinates } : {}),
+        ...(ocrPdfFilename ? { pdf_filename: ocrPdfFilename } : {}),
+        ...(ocrOriginalPdf && !ocrPdfFilename ? { original_pdf: ocrOriginalPdf } : {}),
       };
       if (editMode && selectedForm) {
         await api.put(`/admin/forms/${selectedForm.id}`, payload);
@@ -681,6 +740,13 @@ const FormsTemplates = () => {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setOcrTab('position')}
+                  className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${ocrTab === 'position' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  🎯 Position Fields
+                </button>
+                <button
+                  type="button"
                   onClick={() => setOcrTab('preview')}
                   className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${ocrTab === 'preview' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                 >
@@ -729,7 +795,7 @@ const FormsTemplates = () => {
                 </div>
 
                 {ocrError && (
-                  <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{ocrError}</p>
+                  <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{String(ocrError)}</p>
                 )}
 
                 {ocrRawText && (
@@ -759,6 +825,22 @@ const FormsTemplates = () => {
                     </>
                   )}
                 </button>
+              </div>
+            )}
+
+            {/* POSITION FIELDS TAB */}
+            {ocrTab === 'position' && (
+              <div className="space-y-3">
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm text-indigo-700">
+                  <strong>Visual Position Editor:</strong> Drag field boxes on the PDF to set where values will be printed.
+                  Select a field in the sidebar, then click the PDF to place it. Drag to move, use the corner handle to resize.
+                </div>
+                <PdfFieldEditor
+                  pdfUrl={ocrPdfUrl}
+                  fields={fieldRows}
+                  coordinates={ocrCoordinates}
+                  onChange={setOcrCoordinates}
+                />
               </div>
             )}
 

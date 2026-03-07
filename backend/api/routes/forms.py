@@ -118,13 +118,26 @@ FORM_TEMPLATES = {
 
 @router.get("/templates")
 def get_form_templates(db: Session = Depends(get_db)):
-    """Return published form templates from DB. Falls back to hardcoded if DB is empty."""
+    """Return published form templates from DB, grouped by category.
+    Each category maps to an **array** of template objects so multiple
+    templates per category are supported (e.g. different deposit slip variants).
+    Falls back to hardcoded templates during first boot.
+    """
     from api.models import FormTemplateMetadata
     templates = db.query(FormTemplateMetadata).filter(FormTemplateMetadata.status == "Published").all()
     if templates:
-        return {t.category: {"fields": t.field_definitions} for t in templates}
-    # Fallback to hardcoded during first boot (before seed runs)
-    return FORM_TEMPLATES
+        result: dict = {}
+        for t in templates:
+            entry = {
+                "id": t.id,
+                "name": t.name,
+                "fields": t.field_definitions,
+                "has_pdf": bool(t.original_pdf),
+            }
+            result.setdefault(t.category, []).append(entry)
+        return result
+    # Fallback to hardcoded during first boot (wrap each in a list for consistency)
+    return {k: [v] for k, v in FORM_TEMPLATES.items()}
 
 @router.post("/submit")
 def submit_form(request: FormSubmissionRequest, db: Session = Depends(get_db)):

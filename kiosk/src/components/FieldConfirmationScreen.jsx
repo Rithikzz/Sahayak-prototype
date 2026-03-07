@@ -15,11 +15,15 @@ const FieldConfirmationScreen = () => {
     formData,
     currentFieldIndex,
     setCurrentFieldIndex,
-    formTemplates
+    formTemplates,
+    selectedFormTemplateId,
   } = useAppState();
   
   const t = translations[language];
-  const template = formTemplates[serviceType];
+  const templateArr = formTemplates[serviceType];
+  const template = Array.isArray(templateArr)
+    ? templateArr.find(t => t.id === selectedFormTemplateId) || templateArr[0]
+    : templateArr;
   const fields = template?.fields || [];
   const lastField = fields[currentFieldIndex];
   const lastValue = formData[lastField?.id];

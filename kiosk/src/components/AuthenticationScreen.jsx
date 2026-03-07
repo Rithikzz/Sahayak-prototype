@@ -4,22 +4,23 @@ import { useAppState } from '../context/AppStateContext';
 import { translations } from '../data/mockData';
 
 /**
- * AuthenticationScreen - USER Authentication
- * 
- * This screen comes AFTER language selection and BEFORE OTP.
+ * AuthenticationScreen - Customer Authentication
+ *
  * Users enter account number and 4-digit PIN.
- * 
- * Flow:
- * 1. User enters account number and PIN
- * 2. On confirm: navigate to /otp-verification
- * 3. OTP screen completes authentication
+ * On confirm: calls /api/auth/customer-verify, pre-fills known fields,
+ * then navigates directly to /mode-selection (no OTP step needed).
  */
 const AuthenticationScreen = () => {
   const navigate = useNavigate();
-  const { language, accountNumber, setAccountNumber, pin, setPin } = useAppState();
+  const {
+    language, accountNumber, setAccountNumber,
+    pin, setPin, verifyCustomer, setAuthPassed,
+  } = useAppState();
   const t = translations[language];
 
   const [currentField, setCurrentField] = useState('account'); // 'account' or 'pin'
+  const [verifying, setVerifying] = useState(false);
+  const [authError, setAuthError] = useState('');
 
   const handleKeypadPress = (digit) => {
     if (currentField === 'account') {
@@ -45,13 +46,21 @@ const AuthenticationScreen = () => {
     setCurrentField(field);
   };
 
-  const handleConfirm = () => {
-    if (accountNumber.length >= 10 && pin.length === 4) {
-      navigate('/otp-verification');
+  const handleConfirm = async () => {
+    if (accountNumber.length < 10 || pin.length !== 4) return;
+    setVerifying(true);
+    setAuthError('');
+    const result = await verifyCustomer(accountNumber, pin);
+    setVerifying(false);
+    if (result.success) {
+      setAuthPassed(true);
+      navigate('/mode-selection');
+    } else {
+      setAuthError(result.error || 'Authentication failed. Please check your account number and PIN.');
     }
   };
 
-  const isConfirmEnabled = accountNumber.length >= 10 && pin.length === 4;
+  const isConfirmEnabled = accountNumber.length >= 10 && pin.length === 4 && !verifying;
 
   return (
     <div className="kiosk-screen">
@@ -70,6 +79,49 @@ const AuthenticationScreen = () => {
       <div className="kiosk-content">
         <h1 className="kiosk-title">{t.authentication}</h1>
         <p className="kiosk-subtitle">{t.useKeypad}</p>
+
+        {/* Demo credentials banner */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '24px',
+          padding: '16px 28px',
+          marginBottom: '28px',
+          backgroundColor: '#fffbeb',
+          border: '2px dashed #f6a623',
+          borderRadius: '14px',
+          maxWidth: '600px',
+          width: '100%',
+        }}>
+          <span style={{ fontSize: '28px' }}>🧪</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: '#92400e', marginBottom: '4px' }}>
+              Demo Credentials
+            </div>
+            <div style={{ fontSize: '15px', color: '#78350f', fontFamily: 'monospace' }}>
+              Account: <strong>1234567890123456</strong> &nbsp;|&nbsp; PIN: <strong>1234</strong>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setAccountNumber('1234567890123456');
+              setPin('1234');
+            }}
+            style={{
+              padding: '10px 20px',
+              fontSize: '16px',
+              fontWeight: '700',
+              backgroundColor: '#f6a623',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Auto-fill
+          </button>
+        </div>
 
         <div style={{ width: '100%', maxWidth: '600px', marginBottom: '40px' }}>
           <div
@@ -129,6 +181,25 @@ const AuthenticationScreen = () => {
             </div>
           </div>
         </div>
+
+        {/* Error message */}
+        {authError && (
+          <div style={{
+            marginBottom: '16px',
+            padding: '16px 24px',
+            backgroundColor: '#ffe8e8',
+            border: '2px solid #e53e3e',
+            borderRadius: '12px',
+            color: '#c53030',
+            fontSize: '18px',
+            fontWeight: '600',
+            maxWidth: '600px',
+            width: '100%',
+            textAlign: 'center',
+          }}>
+            {authError}
+          </div>
+        )}
 
         {/* Numeric Keypad */}
         <div className="keypad-container">
@@ -198,7 +269,7 @@ const AuthenticationScreen = () => {
           className="btn btn-success btn-large"
           style={{ minWidth: '300px' }}
         >
-          {t.confirm} →
+          {verifying ? 'Verifying...' : `${t.confirm} →`}
         </button>
       </div>
     </div>

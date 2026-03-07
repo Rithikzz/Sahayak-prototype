@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: sahayak
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -34,8 +34,13 @@ services:
       - STT_SERVICE_URL=http://stt:8001
       - TTS_SERVICE_URL=http://tts:8002
       - OCR_SERVICE_URL=http://ocr:8003
+      - LLM_SERVICE_URL=http://host.docker.internal:8004
     ports:
       - "5000:5000"
+    volumes:
+      - pdf_data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +82,18 @@ services:
       - "8003:8003"
     restart: unless-stopped
 
+  llm:
+    build:
+      context: ./microservices/llm
+      dockerfile: Dockerfile
+    container_name: sahayak_llm
+    network_mode: host
+    environment:
+      - OLLAMA_URL=http://127.0.0.1:11434
+      - MODEL_NAME=llama3.2:1b-instruct-q4_K_M
+      - LLM_TIMEOUT=8
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./kiosk
@@ -103,3 +120,4 @@ services:
 
 volumes:
   postgres_data:
+  pdf_data:

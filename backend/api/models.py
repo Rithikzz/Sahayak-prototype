@@ -18,6 +18,14 @@ class Customer(Base):
     id = Column(Integer, primary_key=True, index=True)
     account_number = Column(String(50), unique=True, index=True)
     phone_number = Column(String(20))
+    # Customer profile fields
+    name = Column(String(150), nullable=True)
+    email = Column(String(255), nullable=True)
+    date_of_birth = Column(String(20), nullable=True)   # stored as DD/MM/YYYY string
+    pan_number = Column(String(20), nullable=True)
+    aadhaar_number = Column(String(20), nullable=True)
+    address = Column(Text, nullable=True)
+    pin_hash = Column(String(255), nullable=True)        # bcrypt-hashed 4-digit PIN
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     submissions = relationship("FormSubmission", back_populates="customer")
@@ -80,12 +88,16 @@ class FormTemplateMetadata(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
-    category = Column(String(100), nullable=False, unique=True)  # matches service_type key
+    category = Column(String(100), nullable=False, index=True)  # matches service_type key; multiple templates allowed per category
     version = Column(Integer, default=1)
     status = Column(String(20), default="Draft")  # Draft | Published | Archived
     description = Column(Text, nullable=True)
     languages = Column(JSON, default=lambda: ["English", "Hindi", "Tamil"])
     field_definitions = Column(JSON, nullable=False)  # list of field objects
+    original_pdf = Column(Text, nullable=True)          # DEPRECATED: base64-encoded original PDF (for backward compat)
+    pdf_filename = Column(String(255), nullable=True)   # filename of PDF on disk (e.g., "17_1772866202.pdf")
+    field_coordinates = Column(JSON, nullable=True)     # { field_id: {page, x, y, width, height, input_y} }
+    has_pdf = Column(Boolean, default=False, nullable=False)  # whether this template has a PDF
     created_by = Column(Integer, ForeignKey("admin_users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())

@@ -7,7 +7,7 @@ from jose import jwt, JWTError
 import os
 
 from api.database import get_db
-from api.models import StaffUser
+from api.models import StaffUser, Customer, Customer
 
 router = APIRouter()
 
@@ -93,3 +93,31 @@ def staff_login(request: StaffLoginRequest, db: Session = Depends(get_db)):
         detail="Incorrect PIN",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+# ── Customer verification ─────────────────────────────────────────────────────
+
+class CustomerVerifyRequest(BaseModel):
+    account_number: str
+    pin: str
+
+@router.post("/customer-verify")
+def customer_verify(request: CustomerVerifyRequest, db: Session = Depends(get_db)):
+    """Verify a customer by account number + PIN and return their profile."""
+    customer = db.query(Customer).filter(
+        Customer.account_number == request.account_number
+    ).first()
+    if not customer or not customer.pin_hash:
+        raise HTTPException(status_code=401, detail="Account not found")
+    if not verify_password(request.pin, customer.pin_hash):
+        raise HTTPException(status_code=401, detail="Incorrect PIN")
+    return {
+        "account_number": customer.account_number,
+        "name": customer.name or "",
+        "phone_number": customer.phone_number or "",
+        "email": customer.email or "",
+        "date_of_birth": customer.date_of_birth or "",
+        "pan_number": customer.pan_number or "",
+        "aadhaar_number": customer.aadhaar_number or "",
+        "address": customer.address or "",
+    }

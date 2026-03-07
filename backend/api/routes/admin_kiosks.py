@@ -196,10 +196,22 @@ kiosk_device_router = APIRouter()
 
 @kiosk_device_router.post("/heartbeat")
 def kiosk_heartbeat(body: HeartbeatRequest, db: Session = Depends(get_db)):
-    """Called by kiosk devices every 60 seconds to report their liveness."""
+    """Called by kiosk devices every 60 seconds to report their liveness.
+    Auto-registers the device if it has never checked in before so heartbeats
+    never return 404 for legitimate kiosk devices.
+    """
     kiosk = db.query(Kiosk).filter(Kiosk.device_id == body.device_id).first()
     if not kiosk:
-        raise HTTPException(status_code=404, detail="Kiosk device_id not registered")
+        # Auto-register on first heartbeat – admin can edit the branch details later
+        kiosk = Kiosk(
+            device_id=body.device_id,
+            branch_name="Auto-registered",
+            branch_code=body.device_id[:30],   # use device_id prefix as temporary code
+            region="Unknown",
+            status="online",
+            installed_version=body.installed_version or "1.0.0",
+        )
+        db.add(kiosk)
 
     kiosk.last_heartbeat = datetime.utcnow()
     kiosk.last_sync = datetime.utcnow()

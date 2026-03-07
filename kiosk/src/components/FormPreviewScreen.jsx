@@ -1,38 +1,75 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { translations } from '../data/mockData';
 
 /**
- * FormPreviewScreen - Read-only preview of complete form
- * Allows zoom and final review before verification
+ * FormPreviewScreen - Shows the actual overlaid PDF (if template has one) or
+ * a plain key/value list as fallback.  Allows zoom and final review before verification.
  */
 const FormPreviewScreen = () => {
   const navigate = useNavigate();
-  const { 
-    language, 
+  const {
+    language,
     serviceType,
     formData,
-    formTemplates
+    formTemplates,
+    selectedFormTemplateId,
   } = useAppState();
-  
+
   const t = translations[language];
-  const template = formTemplates[serviceType];
+
+  // Resolve template from the array-per-category structure
+  const templateArr = formTemplates[serviceType];
+  const template = Array.isArray(templateArr)
+    ? templateArr.find(t => t.id === selectedFormTemplateId) || templateArr[0]
+    : templateArr;
   const fields = template?.fields || [];
+  const hasPdf = template?.has_pdf && selectedFormTemplateId;
 
   const [zoom, setZoom] = useState(100);
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState('');
 
-  const handleZoomIn = () => {
-    setZoom(prev => Math.min(prev + 20, 200));
-  };
+  // Fetch the pre-filled PDF from the backend as soon as we know a template exists
+  useEffect(() => {
+    if (!hasPdf) return;
+    let objectUrl = null;
+    const fetchPdf = async () => {
+      setPdfLoading(true);
+      setPdfError('');
+      try {
+        const res = await fetch('/api/forms/generate-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            form_template_id: selectedFormTemplateId,
+            form_data: formData,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      } catch (e) {
+        console.error('[FormPreview] PDF fetch error:', e);
+        setPdfError(e.message || 'Could not generate PDF preview');
+      } finally {
+        setPdfLoading(false);
+      }
+    };
+    fetchPdf();
+    // Revoke the object URL when unmounting to avoid memory leak
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [hasPdf, selectedFormTemplateId, formData]);
 
-  const handleZoomOut = () => {
-    setZoom(prev => Math.max(prev - 20, 80));
-  };
-
-  const handleProceed = () => {
-    navigate('/voice-verification');
-  };
+  const handleZoomIn  = () => setZoom(prev => Math.min(prev + 20, 200));
+  const handleZoomOut = () => setZoom(prev => Math.max(prev - 20, 60));
+  const handleProceed = () => navigate('/voice-verification');
 
   return (
     <div className="kiosk-screen">
@@ -49,44 +86,77 @@ const FormPreviewScreen = () => {
       <div className="kiosk-content">
         <h1 className="kiosk-title">{t.preview}</h1>
 
-        <div style={{ marginBottom: '20px', display: 'flex', gap: '16px' }}>
-          <button 
-            className="btn btn-outline"
-            onClick={handleZoomOut}
-            style={{ minHeight: '60px', fontSize: '24px' }}
-          >
-            🔍 −
-          </button>
-          <span style={{ fontSize: '24px', display: 'flex', alignItems: 'center' }}>
-            {zoom}%
-          </span>
-          <button 
-            className="btn btn-outline"
-            onClick={handleZoomIn}
-            style={{ minHeight: '60px', fontSize: '24px' }}
-          >
-            🔍 +
-          </button>
+        {/* Zoom controls */}
+        <div style={{ marginBottom: '16px', display: 'flex', gap: '16px', alignItems: 'center' }}>
+          <button className="btn btn-outline" onClick={handleZoomOut}
+            style={{ minHeight: '52px', fontSize: '22px' }}>🔍 −</button>
+          <span style={{ fontSize: '22px' }}>{zoom}%</span>
+          <button className="btn btn-outline" onClick={handleZoomIn}
+            style={{ minHeight: '52px', fontSize: '22px' }}>🔍 +</button>
+          {hasPdf && pdfUrl && (
+            <a href={pdfUrl} download="preview.pdf"
+              style={{ marginLeft: 'auto', fontSize: '18px', color: '#2563eb', textDecoration: 'underline' }}>
+              ⬇ Download
+            </a>
+          )}
         </div>
 
-        <div 
-          className="form-preview"
-          style={{ fontSize: `${zoom}%` }}
-        >
-          {fields.map(field => (
-            <div key={field.id} className="form-field">
-              <span className="field-label">{field.label}:</span>
-              <span className="field-value">{formData[field.id] || 'N/A'}</span>
+        {/* ── PDF Viewer (when template has an original PDF) ── */}
+        {hasPdf ? (
+          pdfLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', fontSize: '20px', color: '#555' }}>
+              ⏳ Generating filled form preview…
             </div>
-          ))}
-        </div>
+          ) : pdfError ? (
+            <div>
+              <div style={{ backgroundColor: '#fee2e2', padding: '16px', borderRadius: '10px',
+                fontSize: '18px', color: '#dc2626', marginBottom: '16px' }}>
+                ⚠️ PDF preview unavailable: {pdfError}
+              </div>
+              {/* Fallback: text list */}
+              <div className="form-preview" style={{ fontSize: `${zoom}%` }}>
+                {fields.map(field => (
+                  <div key={field.id} className="form-field">
+                    <span className="field-label">{field.label}:</span>
+                    <span className="field-value">{formData[field.id] || 'N/A'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : pdfUrl ? (
+            <div style={{
+              width: '100%',
+              height: `${Math.min(600, Math.round(600 * zoom / 100))}px`,
+              border: '2px solid #d1d5db',
+              borderRadius: '10px',
+              overflow: 'hidden',
+              transition: 'height 0.2s',
+            }}>
+              <iframe
+                src={pdfUrl + '#toolbar=0&navpanes=0'}
+                title="Filled Form Preview"
+                style={{ width: '100%', height: '100%', border: 'none' }}
+              />
+            </div>
+          ) : null
+        ) : (
+          /* ── Plain text fallback when no PDF template ── */
+          <div className="form-preview" style={{ fontSize: `${zoom}%` }}>
+            {fields.map(field => (
+              <div key={field.id} className="form-field">
+                <span className="field-label">{field.label}:</span>
+                <span className="field-value">{formData[field.id] || 'N/A'}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-        <div style={{ 
-          backgroundColor: '#d1ecf1', 
-          padding: '24px', 
+        <div style={{
+          backgroundColor: '#d1ecf1',
+          padding: '20px',
           borderRadius: '12px',
-          marginTop: '30px',
-          fontSize: '22px',
+          marginTop: '24px',
+          fontSize: '20px',
           textAlign: 'center',
           maxWidth: '800px'
         }}>
@@ -95,17 +165,10 @@ const FormPreviewScreen = () => {
       </div>
 
       <div className="action-bar">
-        <button 
-          className="btn btn-secondary"
-          onClick={() => navigate('/input')}
-        >
+        <button className="btn btn-secondary" onClick={() => navigate('/input')}>
           ← {t.edit}
         </button>
-
-        <button 
-          className="btn btn-primary btn-large"
-          onClick={handleProceed}
-        >
+        <button className="btn btn-primary btn-large" onClick={handleProceed}>
           {t.proceedToVerification} →
         </button>
       </div>

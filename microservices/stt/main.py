@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import whisper
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -15,7 +16,6 @@ app.add_middleware(
 )
 
 # Load the model into memory defensively on startup
-# Using "base" as requested for good accuracy vs resource mix
 print("Loading Whisper model (base)...")
 try:
     model = whisper.load_model("base")
@@ -24,35 +24,79 @@ except Exception as e:
     print(f"Error loading model: {e}")
     model = None
 
+
 class TranscriptionResponse(BaseModel):
     text: str
     language: str
+
+
+def convert_to_wav(input_path: str) -> str:
+    """
+    Convert any audio format (webm, ogg, mp4, etc.) to a 16 kHz mono PCM WAV
+    that Whisper can reliably decode.  Browser MediaRecorder webm/ogg streams
+    often lack a valid duration header, which causes Whisper's internal ffmpeg
+    decoder to return empty results; an explicit conversion step fixes that.
+    """
+    wav_path = input_path + "_converted.wav"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-ar", "16000",   # 16 kHz sample rate — Whisper native
+        "-ac", "1",       # mono
+        "-f", "wav",
+        wav_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[STT] ffmpeg conversion warning: {result.stderr[-300:]}")
+        # Fall back to original file if conversion fails
+        return input_path
+    size = os.path.getsize(wav_path)
+    print(f"[STT] converted to WAV, size={size} bytes")
+    return wav_path
+
 
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe(file: UploadFile = File(...)):
     if not model:
         raise HTTPException(status_code=500, detail="Whisper model not initialized")
 
-    # Save incoming audio to a temporary file for Whisper to read
+    raw_path = None
+    wav_path = None
     try:
-        suffix = os.path.splitext(file.filename)[1] or ".webm"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(await file.read())
-            tmp_path = tmp.name
+        # 1. Save the incoming blob (webm/ogg/mp4 — whatever the browser sent)
+        suffix = os.path.splitext(file.filename or "")[1] or ".webm"
+        raw_bytes = await file.read()
+        print(f"[STT] received audio: {len(raw_bytes)} bytes, content_type={file.content_type}")
 
-        # Transcribe
-        result = model.transcribe(tmp_path)
-        
-        # Clean up
-        os.unlink(tmp_path)
-        
-        return TranscriptionResponse(
-            text=result["text"].strip(),
-            language=result.get("language", "unknown")
-        )
+        if len(raw_bytes) < 100:
+            print("[STT] audio too small, returning empty")
+            return TranscriptionResponse(text="", language="unknown")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(raw_bytes)
+            raw_path = tmp.name
+
+        # 2. Convert to clean 16 kHz mono WAV — critical for browser webm streams
+        wav_path = convert_to_wav(raw_path)
+
+        # 3. Transcribe with fp16=False (CPU-only host)
+        result = model.transcribe(wav_path, fp16=False)
+        text = result["text"].strip()
+        lang = result.get("language", "unknown")
+        print(f"[STT] transcribed: lang={lang}, text={repr(text)}")
+
+        return TranscriptionResponse(text=text, language=lang)
 
     except Exception as e:
+        print(f"[STT] transcription error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        for p in [raw_path, wav_path]:
+            if p and p != raw_path and os.path.exists(p):
+                os.unlink(p)
+        if raw_path and os.path.exists(raw_path):
+            os.unlink(raw_path)
 
 @app.get("/health")
 def health_check():

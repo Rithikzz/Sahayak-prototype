@@ -48,7 +48,21 @@ async function request(method, path, body = null, isFormData = false) {
     let errorDetail = `HTTP ${response.status}`;
     try {
       const errBody = await response.json();
-      errorDetail = errBody.detail || errBody.message || errorDetail;
+      const raw = errBody.detail ?? errBody.message ?? errBody.error;
+      if (Array.isArray(raw)) {
+        // FastAPI / Pydantic validation errors: [{loc, msg, type}, ...]
+        errorDetail = raw
+          .map(e => {
+            if (e && typeof e.msg === 'string') return e.msg;
+            if (e && typeof e.message === 'string') return e.message;
+            try { return JSON.stringify(e); } catch (_) { return String(e); }
+          })
+          .join('; ');
+      } else if (typeof raw === 'string') {
+        errorDetail = raw;
+      } else if (raw !== null && raw !== undefined) {
+        try { errorDetail = JSON.stringify(raw); } catch (_) { errorDetail = String(raw); }
+      }
     } catch (_) {}
     throw new Error(errorDetail);
   }

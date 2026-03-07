@@ -17,7 +17,7 @@ import { translations } from '../data/mockData';
  */
 const ServiceSelectionScreen = () => {
   const navigate = useNavigate();
-  const { language, setServiceType, setCurrentFormCategory, setFormData, setCurrentFieldIndex } = useAppState();
+  const { language, setServiceType, setCurrentFormCategory, setFormData, setCurrentFieldIndex, formTemplates, selectServiceType } = useAppState();
   const t = translations[language];
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [hoveredTile, setHoveredTile] = useState(null);
@@ -91,12 +91,13 @@ const ServiceSelectionScreen = () => {
 
   const handleServiceSelect = (service) => {
     setSelectedCategory(service.key);
-    setServiceType(service.key);
+    selectServiceType(service.key);
     setCurrentFormCategory(service.key);
     setFormData({});
     setCurrentFieldIndex(0);
     
-    // Navigate after brief animation
+    // Always navigate directly to input — template picker is removed.
+    // selectServiceType() already picked the most recently published template.
     setTimeout(() => {
       navigate('/input');
     }, 300);
