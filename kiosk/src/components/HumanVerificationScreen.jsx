@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { translations } from '../data/mockData';
+import api from '../utils/apiClient';
 
 /**
  * HumanVerificationScreen - Staff approval stage
@@ -48,29 +49,13 @@ const HumanVerificationScreen = () => {
         account_number: accountNumber || formData.accountNumber
       };
 
-      const response = await fetch('/api/forms/submit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.ok) {
-        setVerificationStatus('approved');
-        navigate('/success');
-      } else {
-        const errorData = await response.json();
-        setVerificationStatus('rejected');
-        alert(`Verification Failed: ${errorData.detail || 'Invalid PIN'}`);
-        setPin('');
-        setIsProcessing(false);
-      }
+      await api.post('/forms/submit', payload);
+      setVerificationStatus('approved');
+      navigate('/success');
     } catch (err) {
       console.error('Submission error:', err);
       setVerificationStatus('rejected');
-      alert('Network error during verification. Please try again.');
+      alert(`Verification Failed: ${err.message || 'Invalid PIN'}`);
       setPin('');
       setIsProcessing(false);
     }

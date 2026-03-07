@@ -1,5 +1,9 @@
 # Stage 1: Build
 FROM node:20-alpine AS builder
+
+ARG VITE_ENCRYPTION_KEY
+ENV VITE_ENCRYPTION_KEY=$VITE_ENCRYPTION_KEY
+
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci

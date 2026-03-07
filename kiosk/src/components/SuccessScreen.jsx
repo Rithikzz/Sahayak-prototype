@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { translations } from '../data/mockData';
+import api from '../utils/apiClient';
 
 /**
  * SuccessScreen - Final confirmation and optional receipt printing.
@@ -32,19 +33,11 @@ const SuccessScreen = () => {
     setPrintLoading(true);
     setPrintError('');
     try {
-      const response = await fetch('/api/forms/generate-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          form_template_id: selectedFormTemplateId,
-          form_data: formData,
-        }),
+      const res = await api.post('/forms/generate-pdf', {
+        form_template_id: selectedFormTemplateId,
+        form_data: formData,
       });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || 'PDF generation failed');
-      }
-      const blob = await response.blob();
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err) {

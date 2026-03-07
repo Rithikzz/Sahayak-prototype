@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import api from '../utils/apiClient';
 
 // Central state management for kiosk application
 const AppStateContext = createContext();
@@ -32,15 +33,10 @@ export const AppStateProvider = ({ children }) => {
   useEffect(() => {
     const fetchTemplates = async () => {
       try {
-        const response = await fetch('/api/forms/templates');
-        if (response.ok) {
-          const data = await response.json();
-          setFormTemplates(data);
-        } else {
-          console.error("Failed to fetch templates from backend");
-        }
+        const data = await api.get('/forms/templates');
+        setFormTemplates(data);
       } catch (err) {
-        console.error("Error connecting to backend API:", err);
+        console.error('Error connecting to backend API:', err);
       } finally {
         setIsLoadingTemplates(false);
       }
@@ -125,11 +121,8 @@ export const AppStateProvider = ({ children }) => {
   useEffect(() => {
     const checkUpdate = async () => {
       try {
-        const res = await fetch(`/api/kiosk/pending-update?device_id=${encodeURIComponent(deviceId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.has_update) setPendingUpdate(data);
-        }
+        const data = await api.get(`/kiosk/pending-update?device_id=${encodeURIComponent(deviceId)}`);
+        if (data.has_update) setPendingUpdate(data);
       } catch (_) { /* non-critical */ }
     };
     checkUpdate();
@@ -138,15 +131,11 @@ export const AppStateProvider = ({ children }) => {
   // Send heartbeat every 60 seconds while staff is logged in
   const sendHeartbeat = useCallback(async () => {
     try {
-      await fetch('/api/kiosk/heartbeat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          device_id: deviceId,
-          installed_version: KIOSK_VERSION,
-          forms_today: formsTodayCount,
-          ip_address: null,
-        }),
+      await api.post('/kiosk/heartbeat', {
+        device_id: deviceId,
+        installed_version: KIOSK_VERSION,
+        forms_today: formsTodayCount,
+        ip_address: null,
       });
     } catch (_) { /* non-critical */ }
   }, [deviceId, formsTodayCount]);
@@ -169,21 +158,12 @@ export const AppStateProvider = ({ children }) => {
   // Validate staff PIN against backend API
   const validateStaffPin = async (pin) => {
     try {
-      const response = await fetch('/api/auth/staff-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setAuthToken(data.access_token);
-        setStaffName(data.staff_name);
-        localStorage.setItem('sahayak_token', data.access_token);
-        localStorage.setItem('sahayak_staff_name', data.staff_name);
-        return true;
-      }
-      return false;
+      const data = await api.post('/auth/staff-login', { pin });
+      setAuthToken(data.access_token);
+      setStaffName(data.staff_name);
+      localStorage.setItem('sahayak_token', data.access_token);
+      localStorage.setItem('sahayak_staff_name', data.staff_name);
+      return true;
     } catch (error) {
       console.error('Login error:', error);
       return false;
@@ -219,22 +199,16 @@ export const AppStateProvider = ({ children }) => {
   // Verify customer by account number + PIN; pre-fill form data on success
   const verifyCustomer = async (acctNumber, customerPin) => {
     try {
-      const response = await fetch('/api/auth/customer-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_number: acctNumber, pin: customerPin }),
+      const profile = await api.post('/auth/customer-verify', {
+        account_number: acctNumber,
+        pin: customerPin,
       });
-      if (response.ok) {
-        const profile = await response.json();
-        setCustomerProfile(profile);
-        prefillFromProfile(profile);
-        return { success: true, profile };
-      }
-      const err = await response.json().catch(() => ({}));
-      return { success: false, error: err.detail || 'Verification failed' };
+      setCustomerProfile(profile);
+      prefillFromProfile(profile);
+      return { success: true, profile };
     } catch (error) {
       console.error('Customer verify error:', error);
-      return { success: false, error: 'Network error' };
+      return { success: false, error: error.message || 'Verification failed' };
     }
   };
 

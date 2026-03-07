@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { translations } from '../data/mockData';
+import api from '../utils/apiClient';
 
 /**
  * FormPreviewScreen - Shows the actual overlaid PDF (if template has one) or
@@ -40,18 +41,10 @@ const FormPreviewScreen = () => {
       setPdfLoading(true);
       setPdfError('');
       try {
-        const res = await fetch('/api/forms/generate-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            form_template_id: selectedFormTemplateId,
-            form_data: formData,
-          }),
+        const res = await api.post('/forms/generate-pdf', {
+          form_template_id: selectedFormTemplateId,
+          form_data: formData,
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `HTTP ${res.status}`);
-        }
         const blob = await res.blob();
         objectUrl = URL.createObjectURL(blob);
         setPdfUrl(objectUrl);

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { translations } from '../data/mockData';
+import api from '../utils/apiClient';
 
 /**
  * InputController - Handles data input for selected service
@@ -205,7 +206,7 @@ const InputController = () => {
       const fd = new FormData();
       fd.append('text', text);
       fd.append('lang', language);
-      const response = await fetch('/api/voice/synthesize', { method: 'POST', body: fd });
+      const response = await api.upload('/voice/synthesize', fd);
       if (response.ok) {
         const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
@@ -295,7 +296,7 @@ const InputController = () => {
       fd.append('field_type',  fieldCapture?.type  || 'text');
       fd.append('language',    language || 'en');
 
-      const response = await fetch('/api/voice/transcribe', { method: 'POST', body: fd });
+      const response = await api.upload('/voice/transcribe', fd);
 
       if (response.ok) {
         const data = await response.json();

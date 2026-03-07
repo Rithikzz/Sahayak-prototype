@@ -1,7 +1,9 @@
 /**
  * API Client for Sahayak Admin Portal
- * Wraps fetch with automatic JWT token injection, error handling, and 401 redirect.
+ * Wraps fetch with automatic JWT token injection, ChaCha20-Poly1305
+ * request/response encryption, error handling, and 401 redirect.
  */
+import { encrypt, decrypt } from './crypto.js';
 
 const BASE_URL = '/api';
 const TOKEN_KEY = 'sahayak_admin_token';
@@ -18,18 +20,19 @@ async function request(method, path, body = null, isFormData = false) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  if (!isFormData && body !== null) {
+  let reqBody = null;
+  if (isFormData && body !== null) {
+    reqBody = body;
+  } else if (body !== null) {
     headers['Content-Type'] = 'application/json';
+    headers['X-Chacha-Encrypted'] = '1';
+    reqBody = JSON.stringify(encrypt(body));
+  } else {
+    headers['X-Chacha-Encrypted'] = '1';
   }
 
-  const opts = {
-    method,
-    headers,
-  };
-
-  if (body !== null) {
-    opts.body = isFormData ? body : JSON.stringify(body);
-  }
+  const opts = { method, headers };
+  if (reqBody !== null) opts.body = reqBody;
 
   const response = await fetch(`${BASE_URL}${path}`, opts);
 
@@ -48,7 +51,8 @@ async function request(method, path, body = null, isFormData = false) {
     let errorDetail = `HTTP ${response.status}`;
     try {
       const errBody = await response.json();
-      const raw = errBody.detail ?? errBody.message ?? errBody.error;
+      const decoded = errBody.payload ? decrypt(errBody) : errBody;
+      const raw = decoded.detail ?? decoded.message ?? decoded.error;
       if (Array.isArray(raw)) {
         // FastAPI / Pydantic validation errors: [{loc, msg, type}, ...]
         errorDetail = raw
@@ -69,7 +73,8 @@ async function request(method, path, body = null, isFormData = false) {
 
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
-    return response.json();
+    const data = await response.json();
+    return data.payload ? decrypt(data) : data;
   }
   return response.text();
 }

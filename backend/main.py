@@ -1,9 +1,15 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
+import json
 import bcrypt
+
+from app.crypto.chacha import encrypt as chacha_encrypt, decrypt as chacha_decrypt
 
 from api.database import engine, Base, get_db
 from api.routes import auth, forms, voice
@@ -38,10 +44,69 @@ with engine.connect() as _conn:
 
 app = FastAPI(title="SAHAYAK Kiosk Core API")
 
-# Configure CORS
+# ── ChaCha20-Poly1305 middleware ──────────────────────────────────────────────
+_SKIP_ENCRYPT = {'/health', '/docs', '/openapi.json', '/redoc'}
+
+class ChaChaMiddleware(BaseHTTPMiddleware):
+    """
+    Transparently decrypt incoming JSON bodies and encrypt outgoing JSON responses
+    when the client sends the X-Chacha-Encrypted: 1 header.
+
+    Wire format: {"payload": "<base64(nonce + ciphertext + tag)>"}
+    FormData uploads and binary responses are passed through unchanged.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if (
+            request.headers.get('X-Chacha-Encrypted') == '1'
+            and request.url.path not in _SKIP_ENCRYPT
+        ):
+            # ── Decrypt request body ──────────────────────────────────────────
+            ct = request.headers.get('content-type', '')
+            if ct.startswith('application/json'):
+                raw = await request.body()
+                if raw:
+                    try:
+                        envelope = json.loads(raw)
+                        if 'payload' in envelope:
+                            request._body = chacha_decrypt(envelope['payload'])
+                    except Exception:
+                        return Response(
+                            content=json.dumps({"detail": "Request decryption failed"}),
+                            status_code=400,
+                            media_type='application/json',
+                        )
+
+            response = await call_next(request)
+
+            # ── Encrypt response body ─────────────────────────────────────────
+            resp_ct = response.headers.get('content-type', '')
+            if 'application/json' in resp_ct:
+                body = b''
+                async for chunk in response.body_iterator:
+                    body += chunk
+                encrypted = chacha_encrypt(body)
+                new_body = json.dumps({'payload': encrypted}).encode()
+                return Response(
+                    content=new_body,
+                    status_code=response.status_code,
+                    media_type='application/json',
+                )
+            return response
+
+        return await call_next(request)
+
+app.add_middleware(ChaChaMiddleware)
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+_raw_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost,http://localhost:80,http://localhost:8080"
+)
+_allowed_origins = [o.strip() for o in _raw_origins.split(',') if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
