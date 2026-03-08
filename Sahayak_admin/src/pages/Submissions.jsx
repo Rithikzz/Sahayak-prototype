@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import apiClient from '../utils/apiClient';
+import apiClient, { getToken } from '../utils/apiClient';
 
 const SERVICE_TYPE_LABELS = {
   accountOpeningForms: 'Account Opening',
@@ -181,14 +181,23 @@ const Submissions = () => {
                       >
                         View Details
                       </button>
-                      <a
-                        href={`/api/admin/forms/submissions/${sub.id}/pdf`}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        onClick={async () => {
+                          try {
+                            const token = getToken();
+                            const res = await fetch(`/api/admin/forms/submissions/${sub.id}/pdf`, {
+                              headers: token ? { Authorization: `Bearer ${token}` } : {},
+                            });
+                            if (!res.ok) { alert('PDF not available for this submission'); return; }
+                            const blob = await res.blob();
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, '_blank');
+                          } catch (e) { alert('Failed to load PDF'); }
+                        }}
                         className="text-xs text-emerald-600 hover:text-emerald-800 font-medium hover:underline"
                       >
                         📄 PDF
-                      </a>
+                      </button>
                     </div>
                   </td>
                 </tr>
