@@ -87,6 +87,11 @@ services:
       context: ./microservices/ocr
       dockerfile: Dockerfile
     container_name: sahayak_ocr
+    environment:
+      - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK}
+      - AWS_REGION=${AWS_REGION:-eu-north-1}
+      - VISION_MODEL_ID=${VISION_MODEL_ID:-mistral.pixtral-large-2502-v1:0}
+      - VISION_TIMEOUT=60
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
       interval: 15s
