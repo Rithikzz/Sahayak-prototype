@@ -296,21 +296,15 @@ const InputController = () => {
       fd.append('field_type',  fieldCapture?.type  || 'text');
       fd.append('language',    language || 'en');
 
-      const response = await api.upload('/voice/transcribe', fd);
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = (data.text || '').trim();
-        const finalText = text.length > 0 ? text : '';
-        setInputValue(finalText);
-        // Save context for confirm / repeat actions
-        setPendingField(fieldCapture);
-        setPendingIndex(indexCapture);
-        setVoiceConfirmPending(true);   // show confirmation UI
-      } else {
-        console.error('STT returned error', response.status);
-        setInputValue('Transcription failed. Please try again.');
-      }
+      // api.upload auto-parses JSON, returning the data object directly
+      const data = await api.upload('/voice/transcribe', fd);
+      const text = (data.text || '').trim();
+      const finalText = text.length > 0 ? text : '';
+      setInputValue(finalText);
+      // Save context for confirm / repeat actions
+      setPendingField(fieldCapture);
+      setPendingIndex(indexCapture);
+      setVoiceConfirmPending(true);   // show confirmation UI
     } catch (err) {
       console.error('STT request failed', err);
       setInputValue('Network error. Please try again.');
