@@ -2,6 +2,26 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 import httpx
 import os
+import re
+
+
+def _dedup_repeated(text: str) -> str:
+    """Collapse consecutive repeated words/phrases caused by the user stuttering.
+
+    e.g. 'Deposit Deposit Deposit' → 'Deposit'
+         'ten thousand ten thousand' → 'ten thousand'
+    """
+    if not text:
+        return text
+    # Repeatedly collapse any duplicated sequence of 1-6 words
+    for _ in range(6):
+        text = re.sub(
+            r'\b((?:\w+\s+){0,5}\w+)(\s+\1)+',
+            r'\1',
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+    return text
 
 router = APIRouter()
 
@@ -34,7 +54,7 @@ async def transcribe_audio(
                 raise HTTPException(status_code=stt_resp.status_code, detail="STT Service Error")
 
             stt_data = stt_resp.json()
-            raw_text = (stt_data.get("text") or "").strip()
+            raw_text = _dedup_repeated((stt_data.get("text") or "").strip())
             detected_language = stt_data.get("language", language)
 
         # ── LLM extraction (best-effort) ─────────────────────────────────────
@@ -61,6 +81,9 @@ async def transcribe_audio(
             except Exception as llm_err:
                 # LLM failure is non-fatal — raw STT text is still useful
                 print(f"[VOICE] LLM extraction failed (using raw STT): {llm_err}")
+
+        # Final safety-net dedup in case the LLM echoed repetitions back
+        extracted_text = _dedup_repeated(extracted_text)
 
         return {
             "text": extracted_text,

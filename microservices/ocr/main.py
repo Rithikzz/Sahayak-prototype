@@ -1,5 +1,9 @@
 import io
 import os
+import base64
+import json
+import re
+import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pytesseract
@@ -15,11 +19,153 @@ app.add_middleware(
 )
 
 # Tesseract supports Hindi (hin) and Tamil (tam) in addition to English (eng)
-OCR_LANG = os.getenv("OCR_LANG", "eng+hin+tam")
+OCR_LANG        = os.getenv("OCR_LANG", "eng+hin+tam")
+
+# ── Bedrock / Pixtral vision config ─────────────────────────────────────────
+AWS_BEARER_TOKEN_BEDROCK = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+AWS_REGION               = os.getenv("AWS_REGION", "eu-north-1")
+VISION_MODEL_ID          = os.getenv("VISION_MODEL_ID", "mistral.pixtral-large-2502-v1:0")
+VISION_TIMEOUT           = float(os.getenv("VISION_TIMEOUT", "60"))
+
+BEDROCK_VISION_URL = (
+    f"https://bedrock-runtime.{AWS_REGION}.amazonaws.com"
+    f"/model/{VISION_MODEL_ID}/converse"
+)
+
+PIXTRAL_PROMPT = """You are analyzing a scanned Indian bank form image.
+Identify every input field — any blank line, empty box, or underline where a customer must write data.
+Ignore printed instructions, titles, logos, and watermarks.
+
+Return ONLY a valid JSON array (no markdown, no explanation) using this exact schema:
+[
+  {
+    "id": "camelCaseId",
+    "label": "Exact label text as printed on the form",
+    "type": "text|number|tel|date|email",
+    "required": true,
+    "bbox": {"x": 0.12, "y": 0.23, "w": 0.45, "h": 0.04}
+  }
+]
+
+bbox values are fractions of the image dimensions (0.0 to 1.0).
+x,y = top-left corner of the input area (NOT the label).
+w,h = width and height of the input area.
+type rules: use "tel" for phone/account numbers, "number" for amounts/counts, "date" for dates, "email" for email, "text" for everything else.
+required: true unless the field is clearly optional (e.g. has "(optional)" or "if applicable").
+"""
 
 
+async def call_pixtral(images: list) -> list:
+    """Send all page images to Pixtral via Bedrock and return merged field list.
 
-# Known banking fields: keyword → (canonical_id, display_label, type, required)
+    Each image is encoded as base64 JPEG and sent in a single multi-image message.
+    Returns a list of field dicts with keys: id, label, type, required, bbox, page.
+    Falls back to empty list on any error so the regex fallback can take over.
+    """
+    if not AWS_BEARER_TOKEN_BEDROCK:
+        print("[OCR] AWS_BEARER_TOKEN_BEDROCK not set — skipping Pixtral, using regex fallback")
+        return []
+
+    all_fields: list = []
+
+    for page_num, img in enumerate(images):
+        try:
+            # Convert PIL image → JPEG bytes → base64
+            buf = io.BytesIO()
+            img_rgb = img.convert("RGB")
+            img_rgb.save(buf, format="JPEG", quality=90)
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "image": {
+                                    "format": "jpeg",
+                                    "source": {"bytes": img_b64},
+                                }
+                            },
+                            {"text": PIXTRAL_PROMPT},
+                        ],
+                    }
+                ],
+                "inferenceConfig": {"maxTokens": 2048, "temperature": 0.0},
+            }
+
+            headers = {
+                "Authorization": f"Bearer {AWS_BEARER_TOKEN_BEDROCK}",
+                "Content-Type": "application/json",
+            }
+
+            async with httpx.AsyncClient(timeout=VISION_TIMEOUT) as client:
+                resp = await client.post(BEDROCK_VISION_URL, headers=headers, json=payload)
+                resp.raise_for_status()
+
+            raw_reply = resp.json()["output"]["message"]["content"][0]["text"]
+
+            # Strip markdown code fences if present
+            clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_reply.strip(), flags=re.MULTILINE).strip()
+            page_fields = json.loads(clean)
+
+            if isinstance(page_fields, list):
+                for f in page_fields:
+                    f["page"] = page_num
+                all_fields.extend(page_fields)
+                print(f"[OCR] Pixtral detected {len(page_fields)} fields on page {page_num + 1}")
+
+        except Exception as e:
+            print(f"[OCR] Pixtral failed on page {page_num + 1}: {e}")
+
+    return all_fields
+
+
+def pixtral_bbox_to_pdf_coords(fields: list, images: list) -> dict:
+    """Convert Pixtral fractional bboxes → PDF point coordinates.
+
+    Pixtral returns bbox as fractions of image dimensions.
+    We convert back to PDF points: 1 px = 72/DPI pt (DPI=200).
+    """
+    DPI = 200
+    PT_PER_PX = 72.0 / DPI
+    coordinates: dict = {}
+
+    for f in fields:
+        fid   = f.get("id")
+        bbox  = f.get("bbox", {})
+        page  = f.get("page", 0)
+        if not fid or not bbox or page >= len(images):
+            continue
+
+        img = images[page]
+        img_w, img_h = img.width, img.height
+
+        x_px = bbox.get("x", 0) * img_w
+        y_px = bbox.get("y", 0) * img_h
+        w_px = bbox.get("w", 0) * img_w
+        h_px = bbox.get("h", 0) * img_h
+
+        x_pt = round(x_px * PT_PER_PX, 2)
+        y_pt = round(y_px * PT_PER_PX, 2)
+        w_pt = round(w_px * PT_PER_PX, 2)
+        h_pt = round(h_px * PT_PER_PX, 2)
+
+        coordinates[fid] = {
+            "page":       page,
+            "x":          x_pt,
+            "y":          y_pt,
+            "width":      w_pt,
+            "height":     h_pt,
+            "input_y":    round(y_pt + h_pt + 4, 2),
+            "box_width":  w_pt,
+            "box_height": h_pt if h_pt > 0 else 16.0,
+        }
+
+    return coordinates
+
+
+# ── Regex fallback ────────────────────────────────────────────────────────────
 BANKING_FIELD_RULES = [
     # Account info
     (["account number", "a/c no", "account no", "ac no", "credit card no", "tlidl"],
@@ -284,22 +430,35 @@ def extract_field_coordinates(pdf_bytes: bytes, detected_fields: list, images: l
 
 @app.get("/health")
 def health():
-    return {"status": "OK", "service": "OCR"}
+    return {
+        "status": "OK",
+        "service": "OCR",
+        "vision_model": VISION_MODEL_ID,
+        "vision_ready": bool(AWS_BEARER_TOKEN_BEDROCK),
+    }
 
 
 @app.post("/extract")
 async def extract_form(file: UploadFile = File(...)):
     """
-    Accept a PDF or image file:
-    1. Tesseract OCR extracts raw text and detects banking fields (Pass 1 only).
-    2. For PDFs, pdfplumber extracts bounding-box coordinates for each field label.
-    Returns raw_text, detected_fields, field_coordinates, page_count, file_name.
+    Accept a PDF or image file.
+
+    Pipeline (Pixtral-first):
+
+    Step 1 — Render pages to images (pdf2image / Pillow).
+    Step 2 — Tesseract extracts raw text for audit / debugging.
+    Step 3 — Pixtral (Bedrock vision) analyses each page image and returns:
+               • detected_fields  — all visible input fields with type + required
+               • field_coordinates — bounding boxes as PDF points
+    Step 4 — If Pixtral is unavailable or returns nothing, fall back to the
+               legacy regex rules + pdfplumber coordinate extraction.
     """
     filename = file.filename or ""
     contents = await file.read()
     images: list = []
     is_pdf = filename.lower().endswith(".pdf")
 
+    # ── Step 1: render to images ─────────────────────────────────────────────
     try:
         if is_pdf:
             from pdf2image import convert_from_bytes
@@ -309,26 +468,51 @@ async def extract_form(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Could not open file: {str(e)}")
 
+    # ── Step 2: Tesseract raw text (kept for audit / fallback trigger) ────────
     raw_text_parts = []
     for idx, img in enumerate(images):
         try:
             text = pytesseract.image_to_string(img, lang=OCR_LANG)
             raw_text_parts.append(text)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"OCR failed on page {idx + 1}: {str(e)}")
-
+            print(f"[OCR] Tesseract failed on page {idx + 1}: {e}")
     raw_text = "\n".join(raw_text_parts)
-    detected_fields = extract_fields_from_text(raw_text)
 
-    # Extract bounding-box coordinates for PDF files
-    field_coordinates: dict = {}
-    if is_pdf and detected_fields:
-        field_coordinates = extract_field_coordinates(contents, detected_fields, images=images)
+    # ── Step 3: Pixtral vision (primary) ─────────────────────────────────────
+    pixtral_fields = await call_pixtral(images)
+    used_pixtral = False
+
+    if pixtral_fields:
+        used_pixtral = True
+        # Normalise to the same schema as the regex fallback
+        detected_fields = [
+            {
+                "id":             f.get("id", "unknown"),
+                "label":          f.get("label", ""),
+                "type":           f.get("type", "text"),
+                "required":       f.get("required", True),
+                "detected_value": None,
+            }
+            for f in pixtral_fields
+        ]
+        field_coordinates = pixtral_bbox_to_pdf_coords(pixtral_fields, images)
+        print(f"[OCR] Pixtral path: {len(detected_fields)} fields, "
+              f"{len(field_coordinates)} with coordinates")
+    else:
+        # ── Step 4: regex fallback ────────────────────────────────────────────
+        print("[OCR] Falling back to regex field detection")
+        detected_fields = extract_fields_from_text(raw_text)
+        field_coordinates = {}
+        if is_pdf and detected_fields:
+            field_coordinates = extract_field_coordinates(
+                contents, detected_fields, images=images
+            )
 
     return {
-        "raw_text": raw_text,
-        "detected_fields": detected_fields,
+        "raw_text":          raw_text,
+        "detected_fields":   detected_fields,
         "field_coordinates": field_coordinates,
-        "page_count": len(images),
-        "file_name": filename,
+        "page_count":        len(images),
+        "file_name":         filename,
+        "extraction_method": "pixtral" if used_pixtral else "regex_fallback",
     }
