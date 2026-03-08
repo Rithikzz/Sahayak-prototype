@@ -350,21 +350,61 @@ def get_submission_pdf(
             pass  # file somehow missing — fall through to regeneration
 
     # ── Fallback: regenerate from template + stored form_data ────────────────
+    import logging, json as _json
+    log = logging.getLogger(__name__)
+
+    template = None
     if sub.form_template_id:
         template = db.query(FormTemplateMetadata).filter(
             FormTemplateMetadata.id == sub.form_template_id
         ).first()
-    else:
-        # Old submission — no FK stored. Best-effort match by service_type→category.
+
+    if not template:
+        # 1. Exact category match
         template = db.query(FormTemplateMetadata).filter(
             FormTemplateMetadata.category == sub.service_type,
             FormTemplateMetadata.pdf_filename.isnot(None),
         ).first()
 
     if not template:
+        # 2. Case-insensitive match (ILIKE)
+        template = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.category.ilike(sub.service_type),
+            FormTemplateMetadata.pdf_filename.isnot(None),
+        ).first()
+
+    if not template:
+        # 3. Field-overlap match — pick template whose field_coordinates keys best
+        #    overlap with the submission's form_data keys
+        candidates = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.pdf_filename.isnot(None),
+            FormTemplateMetadata.field_coordinates.isnot(None),
+        ).all()
+        form_keys = set((sub.form_data or {}).keys())
+        best, best_score = None, -1
+        for c in candidates:
+            try:
+                coords = c.field_coordinates if isinstance(c.field_coordinates, dict) else _json.loads(c.field_coordinates or '{}')
+                score = len(form_keys & set(coords.keys()))
+                if score > best_score:
+                    best, best_score = c, score
+            except Exception:
+                pass
+        if best and best_score > 0:
+            template = best
+            log.info("PDF fallback: matched template %s (score=%d) for submission %s via field overlap", best.id, best_score, submission_id)
+
+    if not template:
+        # 4. Last resort: any template with a PDF
+        template = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.pdf_filename.isnot(None),
+        ).first()
+
+    if not template:
+        log.warning("PDF fallback failed for submission %s: service_type=%s", submission_id, sub.service_type)
         raise HTTPException(
             status_code=404,
-            detail="No PDF available: could not find a matching template",
+            detail=f"No PDF available: no template found (service_type={sub.service_type!r})",
         )
     if not template.pdf_filename:
         raise HTTPException(status_code=404, detail="Template PDF not found")

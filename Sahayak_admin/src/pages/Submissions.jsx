@@ -188,7 +188,7 @@ const Submissions = () => {
                             const res = await fetch(`/api/admin/forms/submissions/${sub.id}/pdf`, {
                               headers: token ? { Authorization: `Bearer ${token}` } : {},
                             });
-                            if (!res.ok) { alert('PDF not available for this submission'); return; }
+                            if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.detail || 'PDF not available for this submission'); return; }
                             const blob = await res.blob();
                             const url = URL.createObjectURL(blob);
                             window.open(url, '_blank');
