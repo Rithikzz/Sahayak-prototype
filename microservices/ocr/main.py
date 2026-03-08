@@ -157,9 +157,12 @@ def pixtral_bbox_to_pdf_coords(fields: list, images: list) -> dict:
             "y":          y_pt,
             "width":      w_pt,
             "height":     h_pt,
-            "input_y":    round(y_pt + h_pt + 4, 2),
-            "box_width":  w_pt,
-            "box_height": h_pt if h_pt > 0 else 16.0,
+            # Pixtral bbox IS the input area, so input_y = top of the box (y_pt).
+            # pdf.py draws fitz.Rect(x, input_y, x+box_w, input_y+box_h) which
+            # exactly covers the input area — no offset needed.
+            "input_y":    y_pt,
+            "box_width":  w_pt if w_pt > 10 else 200.0,
+            "box_height": h_pt if h_pt > 4 else 16.0,
         }
 
     return coordinates

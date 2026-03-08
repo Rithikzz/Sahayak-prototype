@@ -36,13 +36,16 @@ class FormSubmission(Base):
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"))
     service_type = Column(String(100), nullable=False)
+    form_template_id = Column(Integer, ForeignKey("form_template_metadata.id"), nullable=True)
     form_data = Column(JSON, nullable=False)
     verified_by_staff_id = Column(Integer, ForeignKey("staff_users.id"))
     status = Column(String(50), default="approved")
+    filled_pdf_filename = Column(String(255), nullable=True)   # path to final filled PDF on disk
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     customer = relationship("Customer", back_populates="submissions")
     verifier = relationship("StaffUser")
+    form_template = relationship("FormTemplateMetadata")
 
 
 # ─────────────────────────────────────────────

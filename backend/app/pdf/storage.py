@@ -53,3 +53,22 @@ def delete_pdf(filename: str) -> None:
 
 def pdf_exists(filename: str) -> bool:
     return os.path.isfile(os.path.join(PDF_DIR, filename))
+
+
+def cleanup_temp_pdfs(max_age_s: int = 86400) -> int:
+    """Delete temp_*.pdf files older than *max_age_s* seconds (default 24 h).
+
+    Returns the number of files removed.  Safe to call on every startup.
+    """
+    import glob
+    removed = 0
+    for path in glob.glob(os.path.join(PDF_DIR, "temp_*.pdf")):
+        try:
+            if time.time() - os.path.getmtime(path) > max_age_s:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        print(f"[pdf.storage] Cleaned up {removed} expired temp PDF(s)")
+    return removed
