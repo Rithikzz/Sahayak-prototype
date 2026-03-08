@@ -3,7 +3,7 @@ name: Build & Deploy to EC2
 # Triggers: every push to main, or manually from the Actions tab
 on:
   push:
-    branches: [main]
+    branches: [main, wearewinning]
   workflow_dispatch:
 
 env:
