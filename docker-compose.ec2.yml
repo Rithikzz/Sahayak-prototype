@@ -38,7 +38,7 @@ services:
       - ollama_data:/root/.ollama   # persists downloaded models across restarts
     # CPU-only; if your EC2 has a GPU add: deploy.resources.reservations.devices
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -59,7 +59,7 @@ services:
       ollama:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8004/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/health')\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -75,7 +75,7 @@ services:
     volumes:
       - whisper_cache:/root/.cache/whisper   # avoids re-downloading Whisper on restart
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -88,7 +88,7 @@ services:
       dockerfile: Dockerfile
     container_name: sahayak_tts
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8002/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -101,7 +101,7 @@ services:
       dockerfile: Dockerfile
     container_name: sahayak_ocr
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8003/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\""]
       interval: 15s
       timeout: 5s
       retries: 5
