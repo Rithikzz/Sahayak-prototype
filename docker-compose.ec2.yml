@@ -30,23 +30,6 @@ services:
     restart: unless-stopped
     # DB port intentionally NOT exposed to host in production
 
-  # ─────────────────────────── OLLAMA ───────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: sahayak_ollama
-    environment:
-      - OLLAMA_KEEP_ALIVE=-1        # never unload model from memory
-    volumes:
-      - ollama_data:/root/.ollama   # persists downloaded models across restarts
-    # CPU-only; if your EC2 has a GPU add: deploy.resources.reservations.devices
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-    restart: unless-stopped
-
   # ─────────────────────────── LLM MICROSERVICE ─────────────────────────────
   llm:
     image: ghcr.io/rithikzz/sahayak-llm:latest
@@ -55,12 +38,11 @@ services:
       dockerfile: Dockerfile
     container_name: sahayak_llm
     environment:
-      - OLLAMA_URL=http://ollama:11434   # points to the ollama container, not host
-      - MODEL_NAME=llama3.2:1b-instruct-q4_K_M
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-amazon.nova-lite-v1:0}
       - LLM_TIMEOUT=25
-    depends_on:
-      ollama:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/health')\""]
       interval: 15s
@@ -205,5 +187,4 @@ services:
 volumes:
   postgres_data:
   pdf_data:
-  ollama_data:     # persists llama3.2 model (~800 MB) — survives container restarts
   whisper_cache:   # persists Whisper base model (~145 MB)
