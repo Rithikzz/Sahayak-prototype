@@ -1,175 +1,24 @@
-name: Build & Deploy to EC2
+name: Deploy to EC2
 
-# Triggers: every push to main, or manually from the Actions tab
 on:
   push:
-    branches: [main, wearewinning]
+    branches: [main]
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  OWNER: rithikzz   # must be lowercase GitHub username
-
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 1 — Build all custom Docker images and push to GHCR
-  # ─────────────────────────────────────────────────────────────────────────
-  build-and-push:
-    name: Build & Push Images
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write   # needed to push to ghcr.io
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ── Backend ───────────────────────────────────────────────────────────
-      - name: Build & push backend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-backend:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-backend:${{ github.sha }}
-          cache-from: type=gha,scope=backend
-          cache-to:   type=gha,mode=max,scope=backend
-
-      # ── LLM microservice ──────────────────────────────────────────────────
-      - name: Build & push LLM microservice
-        uses: docker/build-push-action@v6
-        with:
-          context: ./microservices/llm
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-llm:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-llm:${{ github.sha }}
-          cache-from: type=gha,scope=llm
-          cache-to:   type=gha,mode=max,scope=llm
-
-      # ── STT microservice ──────────────────────────────────────────────────
-      - name: Build & push STT microservice
-        uses: docker/build-push-action@v6
-        with:
-          context: ./microservices/stt
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-stt:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-stt:${{ github.sha }}
-          cache-from: type=gha,scope=stt
-          cache-to:   type=gha,mode=max,scope=stt
-
-      # ── TTS microservice ──────────────────────────────────────────────────
-      - name: Build & push TTS microservice
-        uses: docker/build-push-action@v6
-        with:
-          context: ./microservices/tts
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-tts:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-tts:${{ github.sha }}
-          cache-from: type=gha,scope=tts
-          cache-to:   type=gha,mode=max,scope=tts
-
-      # ── OCR microservice ──────────────────────────────────────────────────
-      - name: Build & push OCR microservice
-        uses: docker/build-push-action@v6
-        with:
-          context: ./microservices/ocr
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-ocr:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-ocr:${{ github.sha }}
-          cache-from: type=gha,scope=ocr
-          cache-to:   type=gha,mode=max,scope=ocr
-
-      # ── Kiosk frontend ────────────────────────────────────────────────────
-      - name: Build & push kiosk frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./kiosk
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-frontend:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-frontend:${{ github.sha }}
-          build-args: |
-            VITE_ENCRYPTION_KEY=${{ secrets.VITE_ENCRYPTION_KEY }}
-          cache-from: type=gha,scope=frontend
-          cache-to:   type=gha,mode=max,scope=frontend
-
-      # ── Admin frontend ────────────────────────────────────────────────────
-      - name: Build & push admin frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./Sahayak_admin
-          push: true
-          tags: |
-            ghcr.io/${{ env.OWNER }}/sahayak-admin:latest
-            ghcr.io/${{ env.OWNER }}/sahayak-admin:${{ github.sha }}
-          build-args: |
-            VITE_ENCRYPTION_KEY=${{ secrets.VITE_ENCRYPTION_KEY }}
-          cache-from: type=gha,scope=admin
-          cache-to:   type=gha,mode=max,scope=admin
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 2 — SSH into EC2, pull new images, restart containers
-  # ─────────────────────────────────────────────────────────────────────────
   deploy:
-    name: Deploy to EC2
-    needs: build-and-push
+    name: SSH & Deploy
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        env:
-          GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          GH_ACTOR: ${{ github.actor }}
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key:      ${{ secrets.EC2_SSH_KEY }}
-          envs:     GHCR_PAT,GH_ACTOR
-          # Zero-downtime rolling deploy:
-          #   1. Pull latest code
-          #   2. Login to GHCR with PAT so EC2 can pull private packages
-          #   3. Pull new images (does NOT restart running containers yet)
-          #   4. up -d recreates only containers whose image changed
-          #   5. Prune dangling old images to free disk
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            set -e
             cd ~/Sahayak-prototype
-
-            echo "==> Pulling latest code"
-            git pull origin main
-
-            echo "==> Logging in to GHCR"
-            echo "$GHCR_PAT" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
-
-            echo "==> Pulling new images"
-            docker compose -f docker-compose.ec2.yml pull \
-              backend llm stt tts ocr frontend admin
-
-            echo "==> Restarting updated containers"
-            docker compose -f docker-compose.ec2.yml up -d --remove-orphans
-
-            echo "==> Cleaning up old images"
-            docker image prune -f
-
-            echo "==> Deploy complete"
-            docker compose -f docker-compose.ec2.yml ps
+            git fetch origin
+            git pull origin ${{ github.ref_name }}
+            docker compose -f docker-compose.ec2.yml up --build -d
