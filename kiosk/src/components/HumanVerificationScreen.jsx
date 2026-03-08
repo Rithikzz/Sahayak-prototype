@@ -16,6 +16,7 @@ const HumanVerificationScreen = () => {
     formData,
     serviceType,
     accountNumber,
+    selectedFormTemplateId,
     authToken
   } = useAppState();
 
@@ -46,7 +47,8 @@ const HumanVerificationScreen = () => {
         service_type: serviceType || 'unknown',
         form_data: formData,
         staff_pin: pin,
-        account_number: accountNumber || formData.accountNumber
+        account_number: accountNumber || formData.accountNumber,
+        form_template_id: selectedFormTemplateId || null,
       };
 
       await api.post('/forms/submit', payload);

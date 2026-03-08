@@ -31,6 +31,9 @@ _MIGRATIONS = [
     "ALTER TABLE form_template_metadata ADD COLUMN IF NOT EXISTS field_coordinates JSONB",
     "ALTER TABLE form_template_metadata ADD COLUMN IF NOT EXISTS pdf_filename VARCHAR(255)",
     "ALTER TABLE form_template_metadata ADD COLUMN IF NOT EXISTS has_pdf BOOLEAN DEFAULT FALSE",
+    # form_submissions — track which template was used and store the filled PDF
+    "ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS form_template_id INTEGER REFERENCES form_template_metadata(id)",
+    "ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS filled_pdf_filename VARCHAR(255)",
 ]
 
 with engine.connect() as _conn:
@@ -41,6 +44,13 @@ with engine.connect() as _conn:
             print(f"[migration] Warning: {_e}")
     _conn.commit()
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Clean up orphaned temp PDFs from aborted OCR upload sessions
+try:
+    from app.pdf.storage import cleanup_temp_pdfs
+    cleanup_temp_pdfs()
+except Exception as _e:
+    print(f"[startup] Temp PDF cleanup skipped: {_e}")
 
 app = FastAPI(title="SAHAYAK Kiosk Core API")
 

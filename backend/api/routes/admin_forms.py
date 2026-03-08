@@ -316,3 +316,67 @@ def get_temp_pdf(filename: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
+
+
+# ── Submission PDF endpoints ──────────────────────────────────────────────────
+
+@router.get("/submissions/{submission_id}/pdf")
+def get_submission_pdf(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin),
+):
+    """Stream the filled PDF for a completed submission.
+
+    Falls back to regenerating it on-the-fly if it was never persisted
+    (e.g. submissions created before this feature was deployed).
+    """
+    from api.models import FormSubmission, FormTemplateMetadata
+
+    sub = db.query(FormSubmission).filter(FormSubmission.id == submission_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    # ── Fast path: already saved on disk ──────────────────────────────────────
+    if sub.filled_pdf_filename:
+        try:
+            pdf_bytes = load_pdf(sub.filled_pdf_filename)
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="submission_{submission_id}.pdf"'},
+            )
+        except FileNotFoundError:
+            pass  # file somehow missing — fall through to regeneration
+
+    # ── Fallback: regenerate from template + stored form_data ────────────────
+    if not sub.form_template_id:
+        raise HTTPException(
+            status_code=404,
+            detail="No PDF available: submission has no linked template",
+        )
+
+    template = db.query(FormTemplateMetadata).filter(
+        FormTemplateMetadata.id == sub.form_template_id
+    ).first()
+    if not template or not template.pdf_filename:
+        raise HTTPException(status_code=404, detail="Template PDF not found")
+
+    try:
+        from app.pdf.overlay import generate_filled_pdf_bytes
+        from app.pdf.storage import save_pdf
+        pdf_bytes = generate_filled_pdf_bytes(template, sub.form_data or {})
+        # Persist so the next call is instant
+        fname = save_pdf(f"sub{sub.id}", pdf_bytes)
+        sub.filled_pdf_filename = fname
+        db.commit()
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Template PDF file missing from storage")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="submission_{submission_id}.pdf"'},
+    )

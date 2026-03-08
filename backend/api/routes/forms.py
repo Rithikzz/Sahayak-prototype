@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from api.database import get_db
 from api.models import StaffUser, Customer, FormSubmission
@@ -11,9 +11,10 @@ router = APIRouter()
 class FormSubmissionRequest(BaseModel):
     service_type: str
     form_data: Dict[str, Any]
-    staff_pin: str # For final human verification step
+    staff_pin: str  # For final human verification step
     account_number: str = None
     phone_number: str = None
+    form_template_id: Optional[int] = None  # which DB template was used
 
 # Hardcoded form templates migrated from mockData.js for the GET endpoint
 FORM_TEMPLATES = {
@@ -132,7 +133,8 @@ def get_form_templates(db: Session = Depends(get_db)):
                 "id": t.id,
                 "name": t.name,
                 "fields": t.field_definitions,
-                "has_pdf": bool(t.original_pdf),
+                # Use pdf_filename as the canonical PDF indicator (original_pdf is deprecated)
+                "has_pdf": bool(t.pdf_filename or t.original_pdf),
             }
             result.setdefault(t.category, []).append(entry)
         return result
@@ -141,30 +143,48 @@ def get_form_templates(db: Session = Depends(get_db)):
 
 @router.post("/submit")
 def submit_form(request: FormSubmissionRequest, db: Session = Depends(get_db)):
-    """Receives completion of a kiosk form flow including staff final verification"""
-    
+    """Receives completion of a kiosk form flow including staff final verification."""
+
+    # 0. Validate required fields if a known template is referenced
+    template = None
+    if request.form_template_id:
+        from api.models import FormTemplateMetadata
+        template = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.id == request.form_template_id
+        ).first()
+        if template and template.field_definitions:
+            missing = [
+                f.get("label", f["id"])
+                for f in template.field_definitions
+                if f.get("required") and not request.form_data.get(f["id"])
+            ]
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Missing required fields: {', '.join(missing)}"
+                )
+
     # 1. Verify staff PIN again (Human Verification Step)
     from api.routes.auth import verify_password
     staff_users = db.query(StaffUser).all()
     verified_staff_id = None
-    
+
     for staff in staff_users:
         if verify_password(request.staff_pin, staff.pin_hash):
             verified_staff_id = staff.id
             break
-            
+
     if not verified_staff_id:
         raise HTTPException(status_code=401, detail="Invalid Staff PIN for verification")
-        
+
     # 2. Get or create customer record if applicable
     customer_id = None
     if request.account_number or request.phone_number:
-        # Try to find existing
         if request.account_number:
             customer = db.query(Customer).filter(Customer.account_number == request.account_number).first()
         else:
             customer = db.query(Customer).filter(Customer.phone_number == request.phone_number).first()
-            
+
         if not customer:
             customer = Customer(
                 account_number=request.account_number,
@@ -173,24 +193,37 @@ def submit_form(request: FormSubmissionRequest, db: Session = Depends(get_db)):
             db.add(customer)
             db.commit()
             db.refresh(customer)
-            
+
         customer_id = customer.id
-        
+
     # 3. Create Submission Record
     submission = FormSubmission(
         customer_id=customer_id,
         service_type=request.service_type,
+        form_template_id=request.form_template_id,
         form_data=request.form_data,
         verified_by_staff_id=verified_staff_id,
         status="approved"
     )
-    
+
     db.add(submission)
     db.commit()
     db.refresh(submission)
-    
+
+    # 4. Persist the filled PDF so admin can reprint later (non-fatal)
+    if template and template.pdf_filename:
+        try:
+            from app.pdf.overlay import generate_filled_pdf_bytes
+            from app.pdf.storage import save_pdf
+            filled_bytes = generate_filled_pdf_bytes(template, request.form_data)
+            fname = save_pdf(f"sub{submission.id}", filled_bytes)
+            submission.filled_pdf_filename = fname
+            db.commit()
+        except Exception as e:
+            print(f"[submit] Could not save filled PDF for submission {submission.id}: {e}")
+
     return {
-        "success": True, 
-        "message": "Form submitted and verified successfully", 
+        "success": True,
+        "message": "Form submitted and verified successfully",
         "submission_id": submission.id
     }

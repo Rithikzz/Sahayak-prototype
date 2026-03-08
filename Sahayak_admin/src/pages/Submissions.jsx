@@ -174,12 +174,24 @@ const Submissions = () => {
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{formatDate(sub.created_at)}</td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => setSelected(sub)}
-                      className="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline"
-                    >
-                      View Details
-                    </button>
+                    <div className="flex items-center space-x-3">
+                      <button
+                        onClick={() => setSelected(sub)}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline"
+                      >
+                        View Details
+                      </button>
+                      {sub.form_template_id && (
+                        <a
+                          href={`/api/admin/forms/submissions/${sub.id}/pdf`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-emerald-600 hover:text-emerald-800 font-medium hover:underline"
+                        >
+                          📄 PDF
+                        </a>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
