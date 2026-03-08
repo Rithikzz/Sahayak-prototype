@@ -3,12 +3,15 @@ LLM Field Extraction Microservice
 POST /extract
 
 Accepts raw STT transcript + field context.
-Calls local Ollama (llama3.2:1b) to extract a clean, formatted field value.
-Gracefully falls back to raw transcript if Ollama is unavailable or slow.
+Calls AWS Bedrock to extract a clean, formatted field value.
+Gracefully falls back to raw transcript if Bedrock is unavailable or slow.
 """
 import os
-import httpx
+import json
 import asyncio
+import concurrent.futures
+import boto3
+from botocore.exceptions import ClientError, BotoCoreError
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -22,9 +25,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
-MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b-instruct-q4_K_M")
-TIMEOUT_SECS = float(os.getenv("LLM_TIMEOUT", "8"))
+AWS_REGION          = os.getenv("AWS_REGION", "us-east-1")
+AWS_ACCESS_KEY_ID   = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+BEDROCK_MODEL_ID    = os.getenv("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+TIMEOUT_SECS        = float(os.getenv("LLM_TIMEOUT", "25"))
+
+def get_bedrock_client():
+    return boto3.client(
+        "bedrock-runtime",
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    )
 
 # --------------------------------------------------------------------------- #
 # Prompt templates per field type
@@ -101,24 +114,15 @@ class ExtractResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# Pull model on startup (non-blocking, tolerates failure)
+# Startup check
 # --------------------------------------------------------------------------- #
 @app.on_event("startup")
-async def pull_model_on_startup():
-    await asyncio.sleep(5)  # wait for Ollama container to be ready
-    print(f"[LLM] Attempting to pull model {MODEL_NAME} …")
-    try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/pull",
-                json={"name": MODEL_NAME, "stream": False},
-            )
-            if resp.status_code == 200:
-                print(f"[LLM] Model {MODEL_NAME} ready.")
-            else:
-                print(f"[LLM] Pull returned {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        print(f"[LLM] Could not pull model at startup (will retry on first request): {e}")
+async def check_bedrock_on_startup():
+    print(f"[LLM] Using AWS Bedrock model: {BEDROCK_MODEL_ID} in {AWS_REGION}")
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        print("[LLM] WARNING: AWS credentials not set — set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+    else:
+        print("[LLM] AWS credentials loaded OK.")
 
 
 # --------------------------------------------------------------------------- #
@@ -127,7 +131,7 @@ async def pull_model_on_startup():
 @app.post("/extract", response_model=ExtractResponse)
 async def extract_field(req: ExtractRequest):
     """
-    Extract a clean field value from raw STT transcript using Llama.
+    Extract a clean field value from raw STT transcript using AWS Bedrock.
     Falls back to raw_text on any failure so the kiosk never blocks.
     """
     raw = req.raw_text.strip()
@@ -139,43 +143,44 @@ async def extract_field(req: ExtractRequest):
     prompt = build_prompt(req.field_label, req.field_type, raw, req.language)
 
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECS) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": MODEL_NAME,
-                    "prompt": prompt,
-                    "system": SYSTEM_PROMPT,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.0,   # deterministic for form extraction
-                        "num_predict": 50,    # short answers only
-                    },
-                },
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            extracted = await asyncio.wait_for(
+                loop.run_in_executor(pool, _call_bedrock, prompt),
+                timeout=TIMEOUT_SECS,
             )
 
-        if resp.status_code != 200:
-            print(f"[LLM] Ollama error {resp.status_code}, falling back to raw text")
-            return ExtractResponse(extracted_value=raw, raw_text=raw, model_used="fallback")
-
-        result = resp.json()
-        extracted = result.get("response", "").strip().strip('"').strip("'")
+        extracted = extracted.strip().strip('"').strip("'")
         print(f"[LLM] '{raw}' → '{extracted}' (field: {req.field_label})")
 
-        # Safety: if model returns garbage/empty, fall back
         if not extracted:
             extracted = raw
 
-        return ExtractResponse(extracted_value=extracted, raw_text=raw, model_used=MODEL_NAME)
+        return ExtractResponse(extracted_value=extracted, raw_text=raw, model_used=BEDROCK_MODEL_ID)
 
-    except (httpx.TimeoutException, httpx.ConnectError) as e:
-        print(f"[LLM] Timeout/connection error, falling back: {e}")
+    except asyncio.TimeoutError:
+        print(f"[LLM] Bedrock timeout after {TIMEOUT_SECS}s, falling back")
         return ExtractResponse(extracted_value=raw, raw_text=raw, model_used="fallback")
     except Exception as e:
-        print(f"[LLM] Unexpected error, falling back: {e}")
+        print(f"[LLM] Bedrock error, falling back: {e}")
         return ExtractResponse(extracted_value=raw, raw_text=raw, model_used="fallback")
+
+
+def _call_bedrock(prompt: str) -> str:
+    """Synchronous Bedrock Converse call (run in thread pool)."""
+    client = get_bedrock_client()
+    response = client.converse(
+        modelId=BEDROCK_MODEL_ID,
+        system=[{"text": SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={
+            "maxTokens": 50,
+            "temperature": 0.0,
+        },
+    )
+    return response["output"]["message"]["content"][0]["text"]
 
 
 @app.get("/health")
 def health():
-    return {"status": "OK", "model": MODEL_NAME, "ollama_url": OLLAMA_URL}
+    return {"status": "OK", "model": BEDROCK_MODEL_ID, "region": AWS_REGION}
