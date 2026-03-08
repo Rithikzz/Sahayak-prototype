@@ -47,6 +47,7 @@ services:
 
   # ─────────────────────────── LLM MICROSERVICE ─────────────────────────────
   llm:
+    image: ghcr.io/rithikzz/sahayak-llm:latest
     build:
       context: ./microservices/llm
       dockerfile: Dockerfile
@@ -68,6 +69,7 @@ services:
 
   # ─────────────────────────── STT MICROSERVICE ─────────────────────────────
   stt:
+    image: ghcr.io/rithikzz/sahayak-stt:latest
     build:
       context: ./microservices/stt
       dockerfile: Dockerfile
@@ -83,6 +85,7 @@ services:
 
   # ─────────────────────────── TTS MICROSERVICE ─────────────────────────────
   tts:
+    image: ghcr.io/rithikzz/sahayak-tts:latest
     build:
       context: ./microservices/tts
       dockerfile: Dockerfile
@@ -96,6 +99,7 @@ services:
 
   # ─────────────────────────── OCR MICROSERVICE ─────────────────────────────
   ocr:
+    image: ghcr.io/rithikzz/sahayak-ocr:latest
     build:
       context: ./microservices/ocr
       dockerfile: Dockerfile
@@ -109,6 +113,7 @@ services:
 
   # ─────────────────────────── BACKEND ──────────────────────────────────────
   backend:
+    image: ghcr.io/rithikzz/sahayak-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -153,6 +158,7 @@ services:
 
   # ─────────────────────────── KIOSK FRONTEND ───────────────────────────────
   frontend:
+    image: ghcr.io/rithikzz/sahayak-frontend:latest
     build:
       context: ./kiosk
       dockerfile: Dockerfile
@@ -166,6 +172,7 @@ services:
 
   # ─────────────────────────── ADMIN FRONTEND ───────────────────────────────
   admin:
+    image: ghcr.io/rithikzz/sahayak-admin:latest
     build:
       context: ./Sahayak_admin
       dockerfile: Dockerfile
