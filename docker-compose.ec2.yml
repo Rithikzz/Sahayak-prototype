@@ -34,6 +34,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: sahayak_ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1        # never unload model from memory
     volumes:
       - ollama_data:/root/.ollama   # persists downloaded models across restarts
     # CPU-only; if your EC2 has a GPU add: deploy.resources.reservations.devices
@@ -55,7 +57,7 @@ services:
     environment:
       - OLLAMA_URL=http://ollama:11434   # points to the ollama container, not host
       - MODEL_NAME=llama3.2:1b-instruct-q4_K_M
-      - LLM_TIMEOUT=8
+      - LLM_TIMEOUT=25
     depends_on:
       ollama:
         condition: service_healthy

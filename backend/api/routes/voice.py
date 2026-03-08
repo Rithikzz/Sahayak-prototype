@@ -52,7 +52,7 @@ async def transcribe_audio(
                             "raw_text": raw_text,
                             "language": detected_language,
                         },
-                        timeout=10.0,
+                        timeout=30.0,
                     )
                 if llm_resp.status_code == 200:
                     llm_data = llm_resp.json()
