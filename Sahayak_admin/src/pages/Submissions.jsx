@@ -181,16 +181,14 @@ const Submissions = () => {
                       >
                         View Details
                       </button>
-                      {sub.form_template_id && (
-                        <a
-                          href={`/api/admin/forms/submissions/${sub.id}/pdf`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs text-emerald-600 hover:text-emerald-800 font-medium hover:underline"
-                        >
-                          📄 PDF
-                        </a>
-                      )}
+                      <a
+                        href={`/api/admin/forms/submissions/${sub.id}/pdf`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-emerald-600 hover:text-emerald-800 font-medium hover:underline"
+                      >
+                        📄 PDF
+                      </a>
                     </div>
                   </td>
                 </tr>

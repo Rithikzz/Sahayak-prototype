@@ -350,16 +350,23 @@ def get_submission_pdf(
             pass  # file somehow missing — fall through to regeneration
 
     # ── Fallback: regenerate from template + stored form_data ────────────────
-    if not sub.form_template_id:
+    if sub.form_template_id:
+        template = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.id == sub.form_template_id
+        ).first()
+    else:
+        # Old submission — no FK stored. Best-effort match by service_type→category.
+        template = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.category == sub.service_type,
+            FormTemplateMetadata.pdf_filename.isnot(None),
+        ).first()
+
+    if not template:
         raise HTTPException(
             status_code=404,
-            detail="No PDF available: submission has no linked template",
+            detail="No PDF available: could not find a matching template",
         )
-
-    template = db.query(FormTemplateMetadata).filter(
-        FormTemplateMetadata.id == sub.form_template_id
-    ).first()
-    if not template or not template.pdf_filename:
+    if not template.pdf_filename:
         raise HTTPException(status_code=404, detail="Template PDF not found")
 
     try:
