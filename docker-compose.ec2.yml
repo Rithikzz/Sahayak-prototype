@@ -38,10 +38,9 @@ services:
       dockerfile: Dockerfile
     container_name: sahayak_llm
     environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-amazon.nova-lite-v1:0}
+      - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK}
+      - AWS_REGION=${AWS_REGION:-eu-north-1}
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-openai.gpt-oss-20b-1:0}
       - LLM_TIMEOUT=25
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/health')\""]

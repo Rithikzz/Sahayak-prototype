@@ -9,9 +9,7 @@ Gracefully falls back to raw transcript if Bedrock is unavailable or slow.
 import os
 import json
 import asyncio
-import concurrent.futures
-import boto3
-from botocore.exceptions import ClientError, BotoCoreError
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -25,19 +23,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-AWS_REGION          = os.getenv("AWS_REGION", "us-east-1")
-AWS_ACCESS_KEY_ID   = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-BEDROCK_MODEL_ID    = os.getenv("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
-TIMEOUT_SECS        = float(os.getenv("LLM_TIMEOUT", "25"))
+AWS_REGION              = os.getenv("AWS_REGION", "eu-north-1")
+AWS_BEARER_TOKEN_BEDROCK = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+BEDROCK_MODEL_ID        = os.getenv("BEDROCK_MODEL_ID", "openai.gpt-oss-20b-1:0")
+TIMEOUT_SECS            = float(os.getenv("LLM_TIMEOUT", "25"))
 
-def get_bedrock_client():
-    return boto3.client(
-        "bedrock-runtime",
-        region_name=AWS_REGION,
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    )
+BEDROCK_URL = (
+    f"https://bedrock-runtime.{AWS_REGION}.amazonaws.com"
+    f"/model/{BEDROCK_MODEL_ID}/converse"
+)
 
 # --------------------------------------------------------------------------- #
 # Prompt templates per field type
@@ -119,10 +113,10 @@ class ExtractResponse(BaseModel):
 @app.on_event("startup")
 async def check_bedrock_on_startup():
     print(f"[LLM] Using AWS Bedrock model: {BEDROCK_MODEL_ID} in {AWS_REGION}")
-    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
-        print("[LLM] WARNING: AWS credentials not set — set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+    if not AWS_BEARER_TOKEN_BEDROCK:
+        print("[LLM] WARNING: AWS_BEARER_TOKEN_BEDROCK not set — Bedrock calls will fail")
     else:
-        print("[LLM] AWS credentials loaded OK.")
+        print("[LLM] Bedrock bearer token loaded OK.")
 
 
 # --------------------------------------------------------------------------- #
@@ -143,12 +137,10 @@ async def extract_field(req: ExtractRequest):
     prompt = build_prompt(req.field_label, req.field_type, raw, req.language)
 
     try:
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            extracted = await asyncio.wait_for(
-                loop.run_in_executor(pool, _call_bedrock, prompt),
-                timeout=TIMEOUT_SECS,
-            )
+        extracted = await asyncio.wait_for(
+            _call_bedrock(prompt),
+            timeout=TIMEOUT_SECS,
+        )
 
         extracted = extracted.strip().strip('"').strip("'")
         print(f"[LLM] '{raw}' → '{extracted}' (field: {req.field_label})")
@@ -166,19 +158,22 @@ async def extract_field(req: ExtractRequest):
         return ExtractResponse(extracted_value=raw, raw_text=raw, model_used="fallback")
 
 
-def _call_bedrock(prompt: str) -> str:
-    """Synchronous Bedrock Converse call (run in thread pool)."""
-    client = get_bedrock_client()
-    response = client.converse(
-        modelId=BEDROCK_MODEL_ID,
-        system=[{"text": SYSTEM_PROMPT}],
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={
-            "maxTokens": 50,
-            "temperature": 0.0,
-        },
-    )
-    return response["output"]["message"]["content"][0]["text"]
+async def _call_bedrock(prompt: str) -> str:
+    """Async Bedrock Converse call via HTTP bearer token auth."""
+    headers = {
+        "Authorization": f"Bearer {AWS_BEARER_TOKEN_BEDROCK}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "system": [{"text": SYSTEM_PROMPT}],
+        "messages": [{"role": "user", "content": [{"text": prompt}]}],
+        "inferenceConfig": {"maxTokens": 50, "temperature": 0.0},
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECS) as client:
+        resp = await client.post(BEDROCK_URL, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+    return data["output"]["message"]["content"][0]["text"]
 
 
 @app.get("/health")
