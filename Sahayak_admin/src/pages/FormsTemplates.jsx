@@ -740,7 +740,20 @@ const FormsTemplates = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setOcrTab('position')}
+                  onClick={() => {
+                    // Auto-place all fields as a starting point if the PDF is loaded
+                    // but no coordinates have been set yet.
+                    if (ocrPdfUrl && fieldRows.length > 0 && Object.keys(ocrCoordinates).length === 0) {
+                      const auto = {};
+                      let y = 50;
+                      fieldRows.forEach((f) => {
+                        auto[f.id] = { page: 0, x: 60, y, input_y: y, box_width: 200, box_height: 16 };
+                        y += 28;
+                      });
+                      setOcrCoordinates(auto);
+                    }
+                    setOcrTab('position');
+                  }}
                   className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${ocrTab === 'position' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   🎯 Position Fields

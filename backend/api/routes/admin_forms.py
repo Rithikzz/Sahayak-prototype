@@ -7,6 +7,9 @@ from datetime import datetime
 import httpx
 import os
 import base64
+import logging
+
+log = logging.getLogger(__name__)
 
 from api.database import get_db
 from api.models import FormTemplateMetadata, AdminUser, AuditLog
@@ -156,6 +159,8 @@ def create_form(
     pdf_fname = _resolve_pdf_filename(body, form.id)
     if pdf_fname:
         form.pdf_filename = pdf_fname
+        form.has_pdf = True
+        log.info("[admin_forms] Saved PDF %s for template %s", pdf_fname, form.id)
 
     db.add(AuditLog(
         admin_user_id=current_admin.id,
@@ -196,6 +201,8 @@ def update_form(
         new_fname = _resolve_pdf_filename(body, form.id)
         if new_fname:
             form.pdf_filename = new_fname
+            form.has_pdf = True
+            log.info("[admin_forms] Updated PDF %s for template %s", new_fname, form.id)
             if old_pdf and old_pdf != new_fname:
                 delete_pdf(old_pdf)  # clean up old file
     if body.field_coordinates is not None:
@@ -404,10 +411,18 @@ def get_submission_pdf(
         log.warning("PDF fallback failed for submission %s: service_type=%s", submission_id, sub.service_type)
         raise HTTPException(
             status_code=404,
-            detail=f"No PDF available: no template found (service_type={sub.service_type!r})",
+            detail=f"No PDF available: no template found for service_type={sub.service_type!r}. "
+                   f"Please create and publish a form template with a PDF for this service type in the admin portal.",
         )
     if not template.pdf_filename:
         raise HTTPException(status_code=404, detail="Template PDF not found")
+
+    coord_count = len(template.field_coordinates or {})
+    if coord_count == 0:
+        log.warning(
+            "Submission %s: template %s has no field_coordinates – PDF will be blank (no overlay)",
+            submission_id, template.id,
+        )
 
     try:
         from app.pdf.overlay import generate_filled_pdf_bytes
@@ -416,10 +431,14 @@ def get_submission_pdf(
         # Persist so the next call is instant
         fname = save_pdf(f"sub{sub.id}", pdf_bytes)
         sub.filled_pdf_filename = fname
+        sub.form_template_id = sub.form_template_id or template.id
         db.commit()
+        log.info("Generated+saved filled PDF %s for submission %s (template %s, %d coord(s))",
+                 fname, submission_id, template.id, coord_count)
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Template PDF file missing from storage")
+        raise HTTPException(status_code=500, detail="Template PDF file missing from storage. Please re-upload the PDF in the admin portal.")
     except Exception as e:
+        log.exception("PDF generation error for submission %s", submission_id)
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
     return Response(

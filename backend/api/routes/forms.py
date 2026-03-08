@@ -211,14 +211,53 @@ def submit_form(request: FormSubmissionRequest, db: Session = Depends(get_db)):
     db.refresh(submission)
 
     # 4. Persist the filled PDF so admin can reprint later (non-fatal)
-    if template and template.pdf_filename:
+    # Resolve template for PDF – prefer the one sent by kiosk; fall back to
+    # best matching published template for this service_type.
+    pdf_template = template  # may be None if no form_template_id was sent
+    if not pdf_template or not pdf_template.pdf_filename:
+        from api.models import FormTemplateMetadata
+        import json as _json
+        # Try published template for this service_type with a PDF
+        pdf_template = db.query(FormTemplateMetadata).filter(
+            FormTemplateMetadata.category == request.service_type,
+            FormTemplateMetadata.pdf_filename.isnot(None),
+            FormTemplateMetadata.status == "Published",
+        ).first()
+        if not pdf_template:
+            # Case-insensitive fallback
+            pdf_template = db.query(FormTemplateMetadata).filter(
+                FormTemplateMetadata.category.ilike(request.service_type),
+                FormTemplateMetadata.pdf_filename.isnot(None),
+            ).first()
+        if not pdf_template:
+            # Field-overlap scoring
+            candidates = db.query(FormTemplateMetadata).filter(
+                FormTemplateMetadata.pdf_filename.isnot(None),
+                FormTemplateMetadata.field_coordinates.isnot(None),
+            ).all()
+            form_keys = set(request.form_data.keys())
+            best, best_score = None, -1
+            for c in candidates:
+                try:
+                    coords = c.field_coordinates if isinstance(c.field_coordinates, dict) else _json.loads(c.field_coordinates or '{}')
+                    score = len(form_keys & set(coords.keys()))
+                    if score > best_score:
+                        best, best_score = c, score
+                except Exception:
+                    pass
+            if best and best_score > 0:
+                pdf_template = best
+
+    if pdf_template and pdf_template.pdf_filename:
         try:
             from app.pdf.overlay import generate_filled_pdf_bytes
             from app.pdf.storage import save_pdf
-            filled_bytes = generate_filled_pdf_bytes(template, request.form_data)
+            filled_bytes = generate_filled_pdf_bytes(pdf_template, request.form_data)
             fname = save_pdf(f"sub{submission.id}", filled_bytes)
             submission.filled_pdf_filename = fname
+            submission.form_template_id = submission.form_template_id or pdf_template.id
             db.commit()
+            print(f"[submit] Saved filled PDF {fname} for submission {submission.id} (template {pdf_template.id})")
         except Exception as e:
             print(f"[submit] Could not save filled PDF for submission {submission.id}: {e}")
 
