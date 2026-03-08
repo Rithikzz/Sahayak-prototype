@@ -263,10 +263,10 @@ const InputController = () => {
       setMediaRecorder(recorder);
       setIsListening(true);
 
-      // 8 seconds gives Whisper on CPU enough audio to work with
+      // 4 seconds — enough for a clear spoken value, avoids repeated-word transcription
       setTimeout(() => {
         if (recorder.state === 'recording') recorder.stop();
-      }, 8000);
+      }, 4000);
     } catch (err) {
       console.error('Microphone access denied:', err);
       alert('Microphone access is required for voice input');
